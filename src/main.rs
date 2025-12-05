@@ -217,24 +217,6 @@ impl Widget for MoonWidget {
 
         let phase = self.status.phase_fraction;
 
-        // Shadow Logic Boundaries (Normalized 0.0 to 1.0)
-        let (min_visible_x, max_visible_x) = if phase < 0.5 {
-            // Waxing: Shadow moves Left to Right (visually revealing from right)
-            // Actually, Waxing = New -> Full.
-            // New (0.0): Dark. 
-            // Quarter (0.25): Right half visible.
-            // Full (0.5): All visible.
-            // Formula: Visible X > (1.0 - 2 * phase)
-            (1.0 - (phase * 2.0), 1.0)
-        } else {
-            // Waning: Shadow moves Left to Right (hiding from left)
-            // Full (0.5): All visible.
-            // Quarter (0.75): Left half visible.
-            // New (1.0): None visible.
-            // Formula: Visible X < (1.0 - (phase - 0.5) * 2.0) -> (1.0 - 2p + 1.0) -> 2.0 - 2p
-            (0.0, 1.0 - ((phase - 0.5) * 2.0))
-        };
-
         // Iterate over the target terminal area
         for y in area.top()..area.bottom() {
             for x in area.left()..area.right() {
@@ -255,18 +237,39 @@ impl Widget for MoonWidget {
                 let row = &source_lines[src_y];
                 let ch = if src_x < row.len() { row[src_x] } else { ' ' };
 
-                // Circular Mask Check (Radius 0.5, Center 0.5, 0.5)
+                // Circular Mask & Spherical Projection Logic
                 let dx = nx - 0.5;
                 let dy = ny - 0.5;
-                if dx*dx + dy*dy > 0.25 {
+                let dist_sq = dx * dx + dy * dy;
+
+                // Radius is 0.5. Radius^2 is 0.25.
+                if dist_sq > 0.25 {
                     continue;
                 }
 
-                // Shadow Mask
-                if nx >= min_visible_x && nx <= max_visible_x {
+                // Map to -1..1 range for sphere math
+                let u = dx * 2.0;
+                let v = dy * 2.0;
+                
+                // z is the depth of the sphere at this pixel (towards viewer)
+                // x^2 + y^2 + z^2 = 1
+                let z = (1.0 - u * u - v * v).sqrt();
+
+                // Sun vector calculation
+                // Angle 0 = New Moon (Sun behind Moon, Vector 0,0,-1)
+                // Angle PI = Full Moon (Sun behind Earth, Vector 0,0,1)
+                let angle = phase * 2.0 * std::f64::consts::PI;
+                let sun_x = angle.sin();
+                let sun_z = -angle.cos();
+
+                // Dot product of Surface Normal (u, v, z) and Sun Vector (sun_x, 0, sun_z)
+                // If positive, the point is illuminated.
+                let intensity = u * sun_x + z * sun_z;
+
+                if intensity > 0.0 {
                      buf.get_mut(x, y).set_char(ch).set_fg(Color::Yellow);
                 } else {
-                    // Draw shadow (space)
+                    // Shadow
                     buf.get_mut(x, y).set_char(' ');
                 }
             }
