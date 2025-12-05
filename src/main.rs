@@ -184,78 +184,90 @@ struct MoonWidget {
 
 impl Widget for MoonWidget {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let lines: Vec<&str> = MOON_ART_RAW.lines().filter(|l| !l.is_empty()).collect();
-        let art_height = lines.len() as u16;
-        let art_width = lines.iter().map(|l| l.len()).max().unwrap_or(0) as u16;
+        // Pre-process source art into a grid for easy sampling
+        let source_lines: Vec<Vec<char>> = MOON_ART_RAW
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| l.chars().collect())
+            .collect();
+        
+        if source_lines.is_empty() { return; }
 
-        // Center the art in the available area
-        let x_offset = area.left() + (area.width.saturating_sub(art_width)) / 2;
-        let y_offset = area.top() + (area.height.saturating_sub(art_height)) / 2;
+        let src_h = source_lines.len() as f64;
+        let src_w = source_lines.iter().map(|l| l.len()).max().unwrap_or(0) as f64;
+
+        // Aspect ratio of the source art (width / height)
+        let art_aspect = src_w / src_h;
+
+        let avail_w = area.width as f64;
+        let avail_h = area.height as f64;
+
+        // Calculate drawing dimensions to fit 'area' while maintaining aspect ratio
+        let (draw_w, draw_h) = if avail_w / avail_h < art_aspect {
+            // Limited by width
+            (avail_w, avail_w / art_aspect)
+        } else {
+            // Limited by height
+            (avail_h * art_aspect, avail_h)
+        };
+
+        // Center the drawing in the area
+        let start_x = area.left() as f64 + (avail_w - draw_w) / 2.0;
+        let start_y = area.top() as f64 + (avail_h - draw_h) / 2.0;
 
         let phase = self.status.phase_fraction;
-        
-        // Define visible range for X axis (normalized 0.0 to 1.0) based on sliding shadow
-        // Waxing (0 -> 0.5): Shadow moves Left (-100% to 0). Right side is visible.
-        // Visible X > (1.0 - 2 * phase)  [Incorrect derivation in thought trace, correcting now]
-        // Let's re-verify:
-        // P=0.0 (New): Visible X > 1.0 (None). Correct.
-        // P=0.25 (Quarter): Visible X > 0.5 (Right Half). Correct.
-        // P=0.5 (Full): Visible X > 0.0 (All). Correct.
-        
-        // Waning (0.5 -> 1.0): Shadow moves Right (0 to 100%). Left side is visible.
-        // P=0.5 (Full): Visible X < 1.0 (All). Correct.
-        // P=0.75 (Quarter): Visible X < 0.5 (Left Half). Correct.
-        // P=1.0 (New): Visible X < 0.0 (None). Correct.
-        
-        // Formula:
+
+        // Shadow Logic Boundaries (Normalized 0.0 to 1.0)
         let (min_visible_x, max_visible_x) = if phase < 0.5 {
-            // Waxing
+            // Waxing: Shadow moves Left to Right (visually revealing from right)
+            // Actually, Waxing = New -> Full.
+            // New (0.0): Dark. 
+            // Quarter (0.25): Right half visible.
+            // Full (0.5): All visible.
+            // Formula: Visible X > (1.0 - 2 * phase)
             (1.0 - (phase * 2.0), 1.0)
         } else {
-            // Waning
+            // Waning: Shadow moves Left to Right (hiding from left)
+            // Full (0.5): All visible.
+            // Quarter (0.75): Left half visible.
+            // New (1.0): None visible.
+            // Formula: Visible X < (1.0 - (phase - 0.5) * 2.0) -> (1.0 - 2p + 1.0) -> 2.0 - 2p
             (0.0, 1.0 - ((phase - 0.5) * 2.0))
         };
 
-        for (y, line) in lines.iter().enumerate() {
-            let term_y = y_offset + y as u16;
-            if term_y >= area.bottom() {
-                break;
-            }
+        // Iterate over the target terminal area
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                // Normalized coordinates relative to the drawn moon box (0.0 to 1.0)
+                let ny = (y as f64 - start_y) / draw_h;
+                let nx = (x as f64 - start_x) / draw_w;
 
-            for (x, ch) in line.chars().enumerate() {
-                let term_x = x_offset + x as u16;
-                if term_x >= area.right() {
-                    break;
+                // Check if we are inside the moon drawing box
+                if ny < 0.0 || ny >= 1.0 || nx < 0.0 || nx >= 1.0 {
+                    continue;
                 }
 
-                // Normalization
-                let nx = x as f64 / art_width as f64;
-                let ny = y as f64 / art_height as f64;
+                // Sample from Source Art (Nearest Neighbor)
+                let src_y = (ny * src_h).floor() as usize;
+                let src_x = (nx * src_w).floor() as usize;
 
-                // Circular Mask (Moon Disk)
-                // Assuming art is roughly square in physical aspect. 
-                // Characters are roughly 1:2 width:height.
-                // So width 160 chars ~ height 80 chars. 
-                // Here width ~ 180, height ~ 90. Ratio is ok.
+                if src_y >= source_lines.len() { continue; }
+                let row = &source_lines[src_y];
+                let ch = if src_x < row.len() { row[src_x] } else { ' ' };
+
+                // Circular Mask Check (Radius 0.5, Center 0.5, 0.5)
                 let dx = nx - 0.5;
                 let dy = ny - 0.5;
-                // Simple distance check from center (radius 0.5)
-                // We use 0.5 as radius.
                 if dx*dx + dy*dy > 0.25 {
-                    // Outside moon disk
-                   continue;
+                    continue;
                 }
 
-                // Shadow Mask (Phase)
+                // Shadow Mask
                 if nx >= min_visible_x && nx <= max_visible_x {
-                     buf.get_mut(term_x, term_y).set_char(ch).set_fg(Color::Yellow);
+                     buf.get_mut(x, y).set_char(ch).set_fg(Color::Yellow);
                 } else {
-                    // Shadowed part: draw faint or space. 
-                    // Let's draw space to mimic the black shadow
-                    // Or maybe a dark gray '.' for earthshine effect?
-                    // The web version uses black shadow (invisible against black bg).
-                    // We'll use space.
-                    buf.get_mut(term_x, term_y).set_char(' ');
+                    // Draw shadow (space)
+                    buf.get_mut(x, y).set_char(' ');
                 }
             }
         }
