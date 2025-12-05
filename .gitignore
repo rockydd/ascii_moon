@@ -1,0 +1,16 @@
+# Rust
+/target
+**/target/
+**/*.rs.bk
+**/*.swp
+
+# IDEs
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Temp files
+*.log
+*.tmp
