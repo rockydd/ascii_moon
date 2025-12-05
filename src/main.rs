@@ -269,8 +269,8 @@ impl Widget for MoonWidget {
                 if intensity > 0.0 {
                      buf.get_mut(x, y).set_char(ch).set_fg(Color::Yellow);
                 } else {
-                    // Shadow
-                    buf.get_mut(x, y).set_char(' ');
+                    // Shadow (Earthshine)
+                    buf.get_mut(x, y).set_char(ch).set_fg(Color::DarkGray);
                 }
             }
         }
