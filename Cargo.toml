@@ -8,3 +8,4 @@ ratatui = "0.26.0"
 crossterm = { version = "0.27.0", features = ["event-stream", "serde"] }
 clap = { version = "4.5.0", features = ["derive"] }
 chrono = "0.4.31"
+unicode-width = "0.2.2"

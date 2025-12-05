@@ -10,6 +10,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 use std::io;
+use unicode_width::UnicodeWidthStr;
 
 /// A TUI to show the moon phase.
 #[derive(Parser, Debug)]
@@ -134,6 +135,56 @@ impl MoonPhase {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Language {
+    English = 0,
+    Chinese = 1,
+    French = 2,
+    Japanese = 3,
+    Spanish = 4,
+}
+
+impl Language {
+    fn next(&self) -> Self {
+        match self {
+            Language::English => Language::Chinese,
+            Language::Chinese => Language::French,
+            Language::French => Language::Japanese,
+            Language::Japanese => Language::Spanish,
+            Language::Spanish => Language::English,
+        }
+    }
+    
+    fn name(&self) -> &'static str {
+        match self {
+            Language::English => "English",
+            Language::Chinese => "中文",
+            Language::French => "Français",
+            Language::Japanese => "日本語",
+            Language::Spanish => "Español",
+        }
+    }
+}
+
+struct Feature {
+    names: [&'static str; 5],
+    lat: f64,
+    lon: f64,
+}
+
+const LUNAR_FEATURES: &[Feature] = &[
+    Feature { names: ["Oceanus Procellarum", "风暴洋", "Océan des Tempêtes", "嵐の大洋", "Océano de las Tormentas"], lat: 18.4, lon: -57.4 },
+    Feature { names: ["Mare Imbrium", "雨海", "Mer des Pluies", "雨の海", "Mar de las Lluvias"], lat: 32.8, lon: -15.6 },
+    Feature { names: ["Mare Serenitatis", "澄海", "Mer de la Sérénité", "晴れの海", "Mar de la Serenidad"], lat: 28.0, lon: 17.5 },
+    Feature { names: ["Mare Tranquillitatis", "静海", "Mer de la Tranquillité", "静かの海", "Mar de la Tranquilidad"], lat: 8.5, lon: 31.4 },
+    Feature { names: ["Mare Crisium", "危海", "Mer des Crises", "危難の海", "Mar de las Crisis"], lat: 17.0, lon: 58.5 },
+    Feature { names: ["Tycho", "第谷", "Tycho", "ティコ", "Tycho"], lat: -43.3, lon: -11.2 },
+    Feature { names: ["Copernicus", "哥白尼", "Copernic", "コペルニクス", "Copérnico"], lat: 9.6, lon: -20.1 },
+    Feature { names: ["Kepler", "开普勒", "Kepler", "ケプラー", "Kepler"], lat: 8.1, lon: -38.0 },
+    Feature { names: ["Aristarchus", "阿里斯塔克斯", "Aristarque", "アリスタルコス", "Aristarco"], lat: 23.7, lon: -47.4 },
+    Feature { names: ["Plato", "柏拉图", "Platon", "プラトン", "Platón"], lat: 51.6, lon: -9.3 },
+];
+
 struct MoonStatus {
     phase: MoonPhase,
     phase_fraction: f64, // 0.0 to 1.0 (0=New, 0.5=Full, 1.0=New)
@@ -180,6 +231,8 @@ fn calculate_moon_phase(date: DateTime<Utc>) -> MoonStatus {
 
 struct MoonWidget {
     status: MoonStatus,
+    show_labels: bool,
+    language: Language,
 }
 
 impl Widget for MoonWidget {
@@ -274,10 +327,46 @@ impl Widget for MoonWidget {
                 }
             }
         }
+
+        // Render Labels
+        if self.show_labels {
+            for feature in LUNAR_FEATURES {
+                // Orthographic projection
+                let rad_lat = feature.lat.to_radians();
+                let rad_lon = feature.lon.to_radians();
+                
+                let u = rad_lat.cos() * rad_lon.sin();
+                let v = rad_lat.sin();
+                
+                // Project to screen UV (0..1)
+                // In math, v is Up. In screen, ny goes Down.
+                // Center is 0.5, 0.5
+                let nx = 0.5 + u / 2.0;
+                let ny = 0.5 - v / 2.0; 
+                
+                let term_x = start_x + nx * draw_w;
+                let term_y = start_y + ny * draw_h;
+                
+                let x_idx = term_x as u16;
+                let y_idx = term_y as u16;
+
+                // Simple collision check with screen bounds
+                if x_idx >= area.left() && x_idx < area.right() && y_idx >= area.top() && y_idx < area.bottom() {
+                    buf.get_mut(x_idx, y_idx).set_char('x').set_fg(Color::Red);
+                    let label_x = x_idx + 1;
+                    let name = feature.names[self.language as usize];
+                    if label_x + (name.width() as u16) < area.right() {
+                        buf.set_string(label_x, y_idx, name, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+                    }
+                }
+            }
+        }
     }
 }
 
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut date: DateTime<Utc>) -> io::Result<()> {
+    let mut show_labels = false;
+    let mut language = Language::English;
     loop {
         terminal.draw(|f| {
             let chunks = Layout::default()
@@ -285,8 +374,8 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut date: DateTime<Utc>) -> i
                 .margin(1)
                 .constraints(
                     [
-                        Constraint::Percentage(85),
-                        Constraint::Percentage(15),
+                        Constraint::Percentage(80),
+                        Constraint::Percentage(20),
                     ]
                     .as_ref(),
                 )
@@ -295,7 +384,11 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut date: DateTime<Utc>) -> i
             let moon = calculate_moon_phase(date);
             
             // Render Custom Moon Widget
-            f.render_widget(MoonWidget { status: MoonStatus { phase: moon.phase, phase_fraction: moon.phase_fraction, age_days: moon.age_days, illumination: moon.illumination } }, chunks[0]);
+            f.render_widget(MoonWidget { 
+                status: MoonStatus { phase: moon.phase, phase_fraction: moon.phase_fraction, age_days: moon.age_days, illumination: moon.illumination },
+                show_labels,
+                language,
+            }, chunks[0]);
 
             // Info Area
             let local_date: DateTime<Local> = DateTime::from(date);
@@ -303,12 +396,19 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut date: DateTime<Utc>) -> i
                 Line::from(vec![
                     Span::raw("Date: "),
                     Span::styled(local_date.format("%Y-%m-%d").to_string(), Style::default().add_modifier(Modifier::BOLD)),
-                    Span::raw(" | Phase: "),
-                    Span::styled(moon.phase.name(), Style::default().fg(Color::Cyan)),
-                    Span::raw(format!(" | Age: {:.1} days", moon.age_days)),
-                    Span::raw(format!(" | Illumination: {:.1}%", moon.illumination)),
                 ]),
-                Line::from(Span::styled("Use <Left>/<Right> to change date. <q> to quit.", Style::default().fg(Color::DarkGray))),
+                Line::from(vec![
+                    Span::raw("Phase: "),
+                    Span::styled(moon.phase.name(), Style::default().fg(Color::Cyan)),
+                ]),
+                Line::from(format!("Age: {:.1} days", moon.age_days)),
+                Line::from(format!("Illumination: {:.1}%", moon.illumination)),
+                Line::from(vec![
+                    Span::raw("Language: "),
+                    Span::styled(language.name(), Style::default().fg(Color::Green)),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled("Use <Left>/<Right> date. <l> labels. <L> language. <q> quit.", Style::default().fg(Color::DarkGray))),
             ];
             
             let info_block = Paragraph::new(info_text)
@@ -322,6 +422,12 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut date: DateTime<Utc>) -> i
                 if key.kind == KeyEventKind::Press {
                     match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                        KeyCode::Char('l') => {
+                            show_labels = !show_labels;
+                        }
+                        KeyCode::Char('L') => {
+                            language = language.next();
+                        }
                         KeyCode::Left => {
                             date = date - Duration::days(1);
                         }
