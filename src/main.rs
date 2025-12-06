@@ -174,9 +174,9 @@ struct Feature {
 
 const LUNAR_FEATURES: &[Feature] = &[
     Feature { names: ["Oceanus Procellarum", "风暴洋", "Océan des Tempêtes", "嵐の大洋", "Océano de las Tormentas"], lat: 18.4, lon: -57.4 },
-    Feature { names: ["Mare Imbrium", "雨海", "Mer des Pluies", "雨の海", "Mar de las Lluvias"], lat: 32.8, lon: -15.6 },
-    Feature { names: ["Mare Serenitatis", "澄海", "Mer de la Sérénité", "晴れの海", "Mar de la Serenidad"], lat: 28.0, lon: 17.5 },
-    Feature { names: ["Mare Tranquillitatis", "静海", "Mer de la Tranquillité", "静かの海", "Mar de la Tranquilidad"], lat: 8.5, lon: 31.4 },
+    Feature { names: ["Mare Imbrium", "雨海", "Mer des Pluies", "雨の海", "Mar de las Lluvias"], lat: 32.8, lon: -25.6 },
+    Feature { names: ["Mare Serenitatis", "澄海", "Mer de la Sérénité", "晴れの海", "Mar de la Serenidad"], lat: 20.0, lon: 13.5 },
+    Feature { names: ["Mare Tranquillitatis", "静海", "Mer de la Tranquillité", "静かの海", "Mar de la Tranquilidad"], lat: 3.5, lon: 22.4 },
     Feature { names: ["Mare Crisium", "危海", "Mer des Crises", "危難の海", "Mar de las Crisis"], lat: 17.0, lon: 58.5 },
     Feature { names: ["Tycho", "第谷", "Tycho", "ティコ", "Tycho"], lat: -43.3, lon: -11.2 },
     Feature { names: ["Copernicus", "哥白尼", "Copernic", "コペルニクス", "Copérnico"], lat: 9.6, lon: -20.1 },
