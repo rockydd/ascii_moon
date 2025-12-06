@@ -246,11 +246,30 @@ impl Widget for MoonWidget {
         
         if source_lines.is_empty() { return; }
 
-        let src_h = source_lines.len() as f64;
-        let src_w = source_lines.iter().map(|l| l.len()).max().unwrap_or(0) as f64;
+        // Calculate bounding box of non-whitespace characters
+        let mut min_x = usize::MAX;
+        let mut max_x = 0;
+        let mut min_y = usize::MAX;
+        let mut max_y = 0;
 
-        // Aspect ratio of the source art (width / height)
-        let art_aspect = src_w / src_h;
+        for (y, line) in source_lines.iter().enumerate() {
+            for (x, &ch) in line.iter().enumerate() {
+                if ch != ' ' {
+                    if x < min_x { min_x = x; }
+                    if x > max_x { max_x = x; }
+                    if y < min_y { min_y = y; }
+                    if y > max_y { max_y = y; }
+                }
+            }
+        }
+
+        if min_x > max_x || min_y > max_y { return; }
+
+        let crop_w = (max_x - min_x + 1) as f64;
+        let crop_h = (max_y - min_y + 1) as f64;
+
+        // Aspect ratio of the cropped source art
+        let art_aspect = crop_w / crop_h;
 
         let avail_w = area.width as f64;
         let avail_h = area.height as f64;
@@ -282,9 +301,9 @@ impl Widget for MoonWidget {
                     continue;
                 }
 
-                // Sample from Source Art (Nearest Neighbor)
-                let src_y = (ny * src_h).floor() as usize;
-                let src_x = (nx * src_w).floor() as usize;
+                // Sample from Source Art (Nearest Neighbor) mapped to CROP box
+                let src_y = (min_y as f64 + ny * crop_h).floor() as usize;
+                let src_x = (min_x as f64 + nx * crop_w).floor() as usize;
 
                 if src_y >= source_lines.len() { continue; }
                 let row = &source_lines[src_y];
@@ -341,8 +360,14 @@ impl Widget for MoonWidget {
                 // Project to screen UV (0..1)
                 // In math, v is Up. In screen, ny goes Down.
                 // Center is 0.5, 0.5
-                let nx = 0.5 + u / 2.0;
-                let ny = 0.5 - v / 2.0; 
+                // Scale 0.95 to pull labels slightly inwards.
+                // Offset (-0.10, -0.10) to shift labels Down-Left (fixing Top-Right bias).
+                let scale = 0.95;
+                let u_adj = u * scale - 0.10;
+                let v_adj = v * scale - 0.10;
+                
+                let nx = 0.5 + u_adj / 2.0;
+                let ny = 0.5 - v_adj / 2.0; 
                 
                 let term_x = start_x + nx * draw_w;
                 let term_y = start_y + ny * draw_h;
@@ -366,19 +391,26 @@ impl Widget for MoonWidget {
 
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut date: DateTime<Utc>) -> io::Result<()> {
     let mut show_labels = false;
+    let mut show_info = true;
     let mut language = Language::English;
     loop {
         terminal.draw(|f| {
+            let constraints = if show_info {
+                vec![
+                    Constraint::Percentage(80),
+                    Constraint::Percentage(20),
+                ]
+            } else {
+                vec![
+                    Constraint::Percentage(100),
+                    Constraint::Min(0),
+                ]
+            };
+
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .margin(1)
-                .constraints(
-                    [
-                        Constraint::Percentage(80),
-                        Constraint::Percentage(20),
-                    ]
-                    .as_ref(),
-                )
+                .constraints(constraints)
                 .split(f.size());
 
             let moon = calculate_moon_phase(date);
@@ -391,30 +423,32 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut date: DateTime<Utc>) -> i
             }, chunks[0]);
 
             // Info Area
-            let local_date: DateTime<Local> = DateTime::from(date);
-            let info_text = vec![
-                Line::from(vec![
-                    Span::raw("Date: "),
-                    Span::styled(local_date.format("%Y-%m-%d").to_string(), Style::default().add_modifier(Modifier::BOLD)),
-                ]),
-                Line::from(vec![
-                    Span::raw("Phase: "),
-                    Span::styled(moon.phase.name(), Style::default().fg(Color::Cyan)),
-                ]),
-                Line::from(format!("Age: {:.1} days", moon.age_days)),
-                Line::from(format!("Illumination: {:.1}%", moon.illumination)),
-                Line::from(vec![
-                    Span::raw("Language: "),
-                    Span::styled(language.name(), Style::default().fg(Color::Green)),
-                ]),
-                Line::from(""),
-                Line::from(Span::styled("Use <Left>/<Right> date. <l> labels. <L> language. <q> quit.", Style::default().fg(Color::DarkGray))),
-            ];
-            
-            let info_block = Paragraph::new(info_text)
-                .block(Block::default().title(" Details ").borders(Borders::ALL))
-                .alignment(Alignment::Center);
-            f.render_widget(info_block, chunks[1]);
+            if show_info {
+                let local_date: DateTime<Local> = DateTime::from(date);
+                let info_text = vec![
+                    Line::from(vec![
+                        Span::raw("Date: "),
+                        Span::styled(local_date.format("%Y-%m-%d").to_string(), Style::default().add_modifier(Modifier::BOLD)),
+                    ]),
+                    Line::from(vec![
+                        Span::raw("Phase: "),
+                        Span::styled(moon.phase.name(), Style::default().fg(Color::Cyan)),
+                    ]),
+                    Line::from(format!("Age: {:.1} days", moon.age_days)),
+                    Line::from(format!("Illumination: {:.1}%", moon.illumination)),
+                    Line::from(vec![
+                        Span::raw("Language: "),
+                        Span::styled(language.name(), Style::default().fg(Color::Green)),
+                    ]),
+                    Line::from(""),
+                    Line::from(Span::styled("Use <Left>/<Right> date. <l> labels. <L> language. <i> toggle info. <q> quit.", Style::default().fg(Color::DarkGray))),
+                ];
+                
+                let info_block = Paragraph::new(info_text)
+                    .block(Block::default().title(" Details ").borders(Borders::ALL))
+                    .alignment(Alignment::Center);
+                f.render_widget(info_block, chunks[1]);
+            }
         })?;
 
         if event::poll(std::time::Duration::from_millis(100))? {
@@ -427,6 +461,9 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut date: DateTime<Utc>) -> i
                         }
                         KeyCode::Char('L') => {
                             language = language.next();
+                        }
+                        KeyCode::Char('i') => {
+                            show_info = !show_info;
                         }
                         KeyCode::Left => {
                             date = date - Duration::days(1);
