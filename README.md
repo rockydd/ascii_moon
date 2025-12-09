@@ -2,7 +2,7 @@
 
 A simple and beautiful Terminal User Interface (TUI) to show the current phase of the moon in ASCII art.
 
-[![asciicast](https://asciinema.org/a/760883.svg)](https://asciinema.org/a/760883)
+[![asciicast](https://asciinema.org/a/6hv6n1VqamlmJYLZA68gdQNhc.svg)](https://asciinema.org/a/6hv6n1VqamlmJYLZA68gdQNhc)
 
 This project is heavily inspired by the beautiful website [asciimoon.com](https://asciimoon.com/).
 
