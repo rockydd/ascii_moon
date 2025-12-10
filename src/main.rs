@@ -19,6 +19,10 @@ struct Args {
     /// Date in YYYY-MM-DD format (defaults to today)
     #[arg(short, long)]
     date: Option<String>,
+
+    /// Render the moon to a specific number of lines (non-interactive)
+    #[arg(long)]
+    lines: Option<u16>,
 }
 
 // Synodic month (new moon to new moon) in days
@@ -480,6 +484,41 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut date: DateTime<Utc>) -> i
 }
 
 
+fn print_moon(lines: u16, date: DateTime<Utc>) -> io::Result<()> {
+    let stdout = io::stdout();
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    terminal.draw(|f| {
+        let size = f.size();
+        let moon = calculate_moon_phase(date);
+
+        // The moon art is roughly 160 chars wide and 80 chars high in the source.
+        // This gives an aspect ratio of 2.0 (width/height).
+        let aspect_ratio = 2.0;
+        let width = (lines as f64 * aspect_ratio) as u16;
+
+        let chunk = Rect {
+            x: 0,
+            y: 0,
+            width: width.min(size.width),
+            height: lines.min(size.height),
+        };
+
+        f.render_widget(MoonWidget {
+            status: moon,
+            show_labels: false,
+            language: Language::English,
+        }, chunk);
+    })?;
+
+    // Move the cursor down after drawing to ensure the shell prompt is on a new line
+    println!();
+
+    Ok(())
+}
+
+
 fn main() -> io::Result<()> {
     let args = Args::parse();
     
@@ -493,6 +532,11 @@ fn main() -> io::Result<()> {
         },
         None => Utc::now(),
     };
+
+    if let Some(lines) = args.lines {
+        // Non-interactive print mode
+        return print_moon(lines, date);
+    }
 
     // Setup terminal
     enable_raw_mode()?;
