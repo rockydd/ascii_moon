@@ -18,6 +18,7 @@ This project is heavily inspired by the beautiful website [asciimoon.com](https:
     *   Toggle the information panel with the **'i'** key.
 *   **Cross-Platform:** Works on Linux, macOS, and Windows.
 *   **Lightweight:** It's a single, small, native binary.
+*   **Non-Interactive Mode:** Print the moon to the console at a specified size for use in scripts or MOTD.
 
 ## Installation
 
@@ -49,19 +50,29 @@ cargo build --release
 
 ## Usage
 
-Run the application directly:
+### Interactive Mode
+
+Run the application without arguments to launch the full-screen interactive TUI:
 
 ```sh
 ascii_moon
 ```
 
-To see the moon on a specific date:
+To see the moon on a specific date in interactive mode:
 
 ```sh
 ascii_moon --date YYYY-MM-DD
 ```
 
-### Controls
+### Non-Interactive (Print) Mode
+
+For scripting or MOTD (Message of the Day) use, you can print the moon directly to the console. Use the `--lines` flag to specify the height of the output.
+
+```sh
+ascii_moon --lines 20
+```
+
+### Controls (Interactive Mode)
 
 *   **<Left Arrow>**: Go back one day.
 *   **<Right Arrow>**: Go forward one day.
