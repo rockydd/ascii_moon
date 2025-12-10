@@ -6,10 +6,11 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
+    backend::Backend,
     prelude::*,
     widgets::{Block, Borders, Paragraph},
 };
-use std::io;
+use std::io::{self, Write};
 use unicode_width::UnicodeWidthStr;
 
 /// A TUI to show the moon phase.
@@ -484,37 +485,70 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut date: DateTime<Utc>) -> i
 }
 
 
+// Helper function to convert ratatui::style::Color to ANSI foreground code
+fn color_to_ansi_fg(color: Color) -> String {
+    match color {
+        Color::Reset => "\x1b[39m".to_string(),
+        Color::Black => "\x1b[30m".to_string(),
+        Color::Red => "\x1b[31m".to_string(),
+        Color::Green => "\x1b[32m".to_string(),
+        Color::Yellow => "\x1b[33m".to_string(),
+        Color::Blue => "\x1b[34m".to_string(),
+        Color::Magenta => "\x1b[35m".to_string(),
+        Color::Cyan => "\x1b[36m".to_string(),
+        Color::Gray => "\x1b[90m".to_string(), // Bright Black
+        Color::DarkGray => "\x1b[30m".to_string(), // Often same as Black
+        Color::LightRed => "\x1b[91m".to_string(),
+        Color::LightGreen => "\x1b[92m".to_string(),
+        Color::LightYellow => "\x1b[93m".to_string(),
+        Color::LightBlue => "\x1b[94m".to_string(),
+        Color::LightMagenta => "\x1b[95m".to_string(),
+        Color::LightCyan => "\x1b[96m".to_string(),
+        Color::White => "\x1b[97m".to_string(),
+        Color::Rgb(r, g, b) => format!("\x1b[38;2;{};{};{}m", r, g, b),
+        Color::Indexed(_) => "\x1b[39m".to_string(), // Default to reset
+    }
+}
+
 fn print_moon(lines: u16, date: DateTime<Utc>) -> io::Result<()> {
-    let stdout = io::stdout();
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    let moon = calculate_moon_phase(date);
 
-    terminal.draw(|f| {
-        let size = f.size();
-        let moon = calculate_moon_phase(date);
+    // The moon art is roughly 160 chars wide and 80 chars high in the source.
+    // This gives an aspect ratio of 2.0 (width/height).
+    let aspect_ratio = 2.0;
+    let width = (lines as f64 * aspect_ratio) as u16;
 
-        // The moon art is roughly 160 chars wide and 80 chars high in the source.
-        // This gives an aspect ratio of 2.0 (width/height).
-        let aspect_ratio = 2.0;
-        let width = (lines as f64 * aspect_ratio) as u16;
+    // Don't let the width exceed the terminal width
+    let (terminal_width, _) = crossterm::terminal::size()?;
+    let width = width.min(terminal_width);
 
-        let chunk = Rect {
-            x: 0,
-            y: 0,
-            width: width.min(size.width),
-            height: lines.min(size.height),
-        };
+    let area = Rect::new(0, 0, width, lines);
+    let mut buffer = Buffer::empty(area);
 
-        f.render_widget(MoonWidget {
-            status: moon,
-            show_labels: false,
-            language: Language::English,
-        }, chunk);
-    })?;
+    let widget = MoonWidget {
+        status: moon,
+        show_labels: false,
+        language: Language::English,
+    };
+    widget.render(area, &mut buffer);
 
-    // Move the cursor down after drawing to ensure the shell prompt is on a new line
-    println!();
+    // Manually print the buffer to stdout with color
+    let mut stdout = io::stdout();
+    let mut last_fg = Color::Reset;
 
+    for y in 0..area.height {
+        for x in 0..area.width {
+            let cell = buffer.get(x, y);
+            if cell.fg != last_fg {
+                write!(stdout, "{}", color_to_ansi_fg(cell.fg))?;
+                last_fg = cell.fg;
+            }
+            write!(stdout, "{}", cell.symbol())?;
+        }
+        writeln!(stdout, "\x1b[0m")?; // Reset color at end of line and print newline
+    }
+
+    stdout.flush()?;
     Ok(())
 }
 
