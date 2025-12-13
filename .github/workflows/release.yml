@@ -47,3 +47,71 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: target/release/${{ matrix.asset_name }}
+
+  update_homebrew_tap:
+    name: Update Homebrew tap formula
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compute source tarball SHA256
+        id: sha
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          TARBALL_URL="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz"
+          echo "tarball_url=${TARBALL_URL}" >> "$GITHUB_OUTPUT"
+          # Download tarball and compute sha256
+          SHA256="$(curl -fsSL "${TARBALL_URL}" | sha256sum | awk '{print $1}')"
+          echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap repo
+        uses: actions/checkout@v4
+        with:
+          repository: rockydd/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update ascii_moon formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          FORMULA="homebrew-tap/ascii_moon.rb"
+          URL="${{ steps.sha.outputs.tarball_url }}"
+          SHA="${{ steps.sha.outputs.sha256 }}"
+
+          python3 - << 'PY'
+          import os, re
+          formula = os.environ["FORMULA"]
+          url = os.environ["URL"]
+          sha = os.environ["SHA"]
+          with open(formula, "r", encoding="utf-8") as f:
+            s = f.read()
+          s2 = re.sub(r'^\s*url\s+"[^"]+"\s*$', f'  url "{url}"', s, flags=re.M)
+          s2 = re.sub(r'^\s*sha256\s+"[0-9a-fA-F]+"\s*$', f'  sha256 "{sha}"', s2, flags=re.M)
+          if s2 == s:
+            raise SystemExit(f"No changes applied to {formula} (url/sha256 not found?)")
+          with open(formula, "w", encoding="utf-8") as f:
+            f.write(s2)
+          print(f"Updated {formula} to url={url} sha256={sha}")
+          PY
+        env:
+          FORMULA: homebrew-tap/ascii_moon.rb
+          URL: ${{ steps.sha.outputs.tarball_url }}
+          SHA: ${{ steps.sha.outputs.sha256 }}
+
+      - name: Create PR in tap repo
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+          commit-message: "ascii_moon: bump to ${{ github.ref_name }}"
+          title: "ascii_moon: bump to ${{ github.ref_name }}"
+          body: |
+            Automated update from `${{ github.repository }}` release `${{ github.ref_name }}`.
+
+            - Source tarball: `${{ steps.sha.outputs.tarball_url }}`
+            - SHA256: `${{ steps.sha.outputs.sha256 }}`
+          branch: "automation/ascii_moon-${{ github.ref_name }}"
+          delete-branch: true
