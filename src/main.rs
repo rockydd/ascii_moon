@@ -26,11 +26,8 @@ struct Args {
     lines: Option<u16>,
 }
 
-// Synodic month (new moon to new moon) in days
+// Synodic month (new moon to new moon) in days (average; used only to express "age" in days)
 const SYNODIC_MONTH: f64 = 29.53058867;
-
-// Known new moon: January 6, 2000 at 18:14 UTC
-const KNOWN_NEW_MOON_SEC: i64 = 947182440; 
 
 const MOON_ART_RAW: &str = r#"                                                                                    #@&&%#%&(#&###&%###&&&&#/(@&(###.  %/#,                                                                             
                                                                             #&%%#&@%(&%##(*%&%##(###&&%&%#(#%&%%%&%###%(%#(#((@&&&(/.                                                                   
@@ -197,20 +194,70 @@ struct MoonStatus {
     illumination: f64,
 }
 
-fn calculate_moon_phase(date: DateTime<Utc>) -> MoonStatus {
-    let diff = date.timestamp() - KNOWN_NEW_MOON_SEC;
-    let days_since_known_new_moon = diff as f64 / 86400.0;
-    
-    // Normalize to 0..29.53
-    let mut age = days_since_known_new_moon % SYNODIC_MONTH;
-    if age < 0.0 {
-        age += SYNODIC_MONTH;
+fn normalize_degrees(mut deg: f64) -> f64 {
+    deg %= 360.0;
+    if deg < 0.0 {
+        deg += 360.0;
     }
+    deg
+}
 
-    let phase_fraction = age / SYNODIC_MONTH;
+fn deg_to_rad(deg: f64) -> f64 {
+    deg * std::f64::consts::PI / 180.0
+}
+
+fn julian_day_utc(dt: DateTime<Utc>) -> f64 {
+    // Unix epoch (1970-01-01T00:00:00Z) is JD 2440587.5
+    let unix = dt.timestamp() as f64 + (dt.timestamp_subsec_nanos() as f64) * 1e-9;
+    unix / 86400.0 + 2440587.5
+}
+
+fn calculate_moon_phase(date: DateTime<Utc>) -> MoonStatus {
+    // This uses a common Meeus-style approximation:
+    // compute Sun and Moon ecliptic longitudes and take their elongation.
+    // This is far more accurate than assuming a constant-length synodic month.
+    let jd = julian_day_utc(date);
+    let d = jd - 2451545.0; // days since J2000.0
+
+    // Sun (approx): mean longitude L and mean anomaly g
+    let l0 = normalize_degrees(280.460 + 0.9856474 * d);
+    let g = normalize_degrees(357.528 + 0.9856003 * d);
+    let lambda_sun = normalize_degrees(
+        l0 + 1.915 * deg_to_rad(g).sin() + 0.020 * deg_to_rad(2.0 * g).sin(),
+    );
+
+    // Moon (approx): mean longitude l, mean anomaly Mm, mean elongation D, argument of latitude F
+    let l = normalize_degrees(218.316 + 13.176396 * d);
+    let mm = normalize_degrees(134.963 + 13.064993 * d);
+    let d_moon = normalize_degrees(297.850 + 12.190749 * d);
+    let f = normalize_degrees(93.272 + 13.229350 * d);
+
+    // Moon longitude with a set of major periodic terms (degrees)
+    let lambda_moon = normalize_degrees(
+        l + 6.289 * deg_to_rad(mm).sin()
+            + 1.274 * deg_to_rad(2.0 * d_moon - mm).sin()
+            + 0.658 * deg_to_rad(2.0 * d_moon).sin()
+            + 0.214 * deg_to_rad(2.0 * mm).sin()
+            - 0.186 * deg_to_rad(g).sin()
+            - 0.059 * deg_to_rad(2.0 * d_moon - 2.0 * mm).sin()
+            - 0.057 * deg_to_rad(2.0 * d_moon - mm - g).sin()
+            + 0.053 * deg_to_rad(2.0 * d_moon + mm).sin()
+            + 0.046 * deg_to_rad(2.0 * d_moon - g).sin()
+            + 0.041 * deg_to_rad(mm - g).sin()
+            - 0.035 * deg_to_rad(d_moon).sin()
+            - 0.031 * deg_to_rad(mm + g).sin()
+            - 0.015 * deg_to_rad(2.0 * f - 2.0 * d_moon).sin()
+            + 0.011 * deg_to_rad(2.0 * d_moon - 4.0 * mm).sin(),
+    );
+
+    // Elongation (0..360): 0=new, 180=full
+    let elongation_deg = normalize_degrees(lambda_moon - lambda_sun);
+    let phase_fraction = elongation_deg / 360.0;
+
+    // Express "age" in days using the mean synodic month (good enough for display).
+    let age = phase_fraction * SYNODIC_MONTH;
 
     let segment = (phase_fraction * 8.0).round() as i32 % 8;
-    
     let phase = match segment {
         0 => MoonPhase::New,
         1 => MoonPhase::WaxingCrescent,
@@ -223,14 +270,51 @@ fn calculate_moon_phase(date: DateTime<Utc>) -> MoonStatus {
         _ => MoonPhase::New,
     };
 
-    let angle = phase_fraction * 2.0 * std::f64::consts::PI;
-    let illumination = 0.5 * (1.0 - angle.cos());
+    let illumination = 0.5 * (1.0 - deg_to_rad(elongation_deg).cos());
 
     MoonStatus {
         phase,
         phase_fraction,
         age_days: age,
         illumination: illumination * 100.0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn illumination_close_to_timeanddate_example_2025_12_13_utc() {
+        // timeanddate.com shows ~37.1% illumination for Washington DC at Dec 12, 2025 11:46:50 pm local.
+        // That corresponds to 2025-12-13 04:46:50 UTC (EST is UTC-5).
+        // Source: https://www.timeanddate.com/moon/phases/
+        let dt = Utc.with_ymd_and_hms(2025, 12, 13, 4, 46, 50).unwrap();
+        let moon = calculate_moon_phase(dt);
+        let expected = 37.1;
+        let diff = (moon.illumination - expected).abs();
+        assert!(
+            diff <= 6.0,
+            "illumination {:.2}% differs too much from expected {:.1}% (diff {:.2}%)",
+            moon.illumination,
+            expected,
+            diff
+        );
+    }
+
+    #[test]
+    fn near_full_moon_is_highly_illuminated_2025_12_04_utc() {
+        // timeanddate.com lists Full Moon on Dec 4, 2025 at 6:14 pm (Washington DC).
+        // That's 2025-12-04 23:14:00 UTC.
+        // Source: https://www.timeanddate.com/moon/phases/
+        let dt = Utc.with_ymd_and_hms(2025, 12, 4, 23, 14, 0).unwrap();
+        let moon = calculate_moon_phase(dt);
+        assert!(
+            moon.illumination >= 95.0,
+            "expected near-full illumination, got {:.2}%",
+            moon.illumination
+        );
     }
 }
 
@@ -302,7 +386,7 @@ impl Widget for MoonWidget {
                 let nx = (x as f64 - start_x) / draw_w;
 
                 // Check if we are inside the moon drawing box
-                if ny < 0.0 || ny >= 1.0 || nx < 0.0 || nx >= 1.0 {
+                if !(0.0..1.0).contains(&ny) || !(0.0..1.0).contains(&nx) {
                     continue;
                 }
 
@@ -456,29 +540,28 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut date: DateTime<Utc>) -> i
             }
         })?;
 
-        if event::poll(std::time::Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                        KeyCode::Char('l') => {
-                            show_labels = !show_labels;
-                        }
-                        KeyCode::Char('L') => {
-                            language = language.next();
-                        }
-                        KeyCode::Char('i') => {
-                            show_info = !show_info;
-                        }
-                        KeyCode::Left => {
-                            date = date - Duration::days(1);
-                        }
-                        KeyCode::Right => {
-                            date = date + Duration::days(1);
-                        }
-                        _ => {}
-                    }
+        if event::poll(std::time::Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                KeyCode::Char('l') => {
+                    show_labels = !show_labels;
                 }
+                KeyCode::Char('L') => {
+                    language = language.next();
+                }
+                KeyCode::Char('i') => {
+                    show_info = !show_info;
+                }
+                KeyCode::Left => {
+                    date -= Duration::days(1);
+                }
+                KeyCode::Right => {
+                    date += Duration::days(1);
+                }
+                _ => {}
             }
         }
     }
@@ -519,7 +602,8 @@ fn print_moon(lines: u16, date: DateTime<Utc>) -> io::Result<()> {
     let width = (lines as f64 * aspect_ratio) as u16;
 
     // Don't let the width exceed the terminal width
-    let (terminal_width, _) = crossterm::terminal::size()?;
+    // In non-TTY scenarios, `size()` can fail; fall back to a reasonable default.
+    let (terminal_width, _) = crossterm::terminal::size().unwrap_or((80, 0));
     let width = width.min(terminal_width);
 
     let area = Rect::new(0, 0, width, lines);
@@ -559,9 +643,15 @@ fn main() -> io::Result<()> {
     // Parse date or use now
     let date = match args.date {
         Some(d) => {
-            let naive = NaiveDate::parse_from_str(&d, "%Y-%m-%d")
-                .expect("Invalid date format. Use YYYY-MM-DD")
-                .and_hms_opt(12, 0, 0).unwrap(); // Midday
+            let naive_date = NaiveDate::parse_from_str(&d, "%Y-%m-%d").map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Invalid date format. Use YYYY-MM-DD",
+                )
+            })?;
+            let naive = naive_date
+                .and_hms_opt(12, 0, 0)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid date"))?; // Midday
             Utc.from_utc_datetime(&naive)
         },
         None => Utc::now(),
