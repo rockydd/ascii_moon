@@ -11,6 +11,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 use std::io::{self, Write};
+use std::time::Instant;
 use unicode_width::UnicodeWidthStr;
 
 /// A TUI to show the moon phase.
@@ -24,6 +25,10 @@ struct Args {
     /// Render the moon to a specific number of lines (non-interactive)
     #[arg(long)]
     lines: Option<u16>,
+
+    /// Auto-refresh period in minutes in interactive mode (0 disables auto-refresh)
+    #[arg(long, default_value_t = 5)]
+    refresh_minutes: u64,
 }
 
 // Synodic month (new moon to new moon) in days (average; used only to express "age" in days)
@@ -478,88 +483,148 @@ impl Widget for MoonWidget {
     }
 }
 
-fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut date: DateTime<Utc>) -> io::Result<()> {
+fn run_app<B: Backend>(
+    terminal: &mut Terminal<B>,
+    mut date: DateTime<Utc>,
+    mut follow_now: bool,
+    refresh_minutes: u64,
+) -> io::Result<()> {
     let mut show_labels = false;
     let mut show_info = true;
     let mut language = Language::English;
+    let tick_rate = if refresh_minutes == 0 {
+        None
+    } else {
+        Some(std::time::Duration::from_secs(refresh_minutes.saturating_mul(60)))
+    };
+    let mut last_tick = Instant::now();
+    let mut needs_redraw = true;
     loop {
-        terminal.draw(|f| {
-            let constraints = if show_info {
-                vec![
-                    Constraint::Percentage(80),
-                    Constraint::Percentage(20),
-                ]
-            } else {
-                vec![
-                    Constraint::Percentage(100),
-                    Constraint::Min(0),
-                ]
-            };
+        if needs_redraw {
+            terminal.draw(|f| {
+                let constraints = if show_info {
+                    vec![Constraint::Percentage(80), Constraint::Percentage(20)]
+                } else {
+                    vec![Constraint::Percentage(100), Constraint::Min(0)]
+                };
 
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .margin(1)
-                .constraints(constraints)
-                .split(f.size());
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .margin(1)
+                    .constraints(constraints)
+                    .split(f.size());
 
-            let moon = calculate_moon_phase(date);
-            
-            // Render Custom Moon Widget
-            f.render_widget(MoonWidget { 
-                status: MoonStatus { phase: moon.phase, phase_fraction: moon.phase_fraction, age_days: moon.age_days, illumination: moon.illumination },
-                show_labels,
-                language,
-            }, chunks[0]);
+                let moon = calculate_moon_phase(date);
 
-            // Info Area
-            if show_info {
-                let local_date: DateTime<Local> = DateTime::from(date);
-                let info_text = vec![
-                    Line::from(vec![
-                        Span::raw("Date: "),
-                        Span::styled(local_date.format("%Y-%m-%d").to_string(), Style::default().add_modifier(Modifier::BOLD)),
-                    ]),
-                    Line::from(vec![
-                        Span::raw("Phase: "),
-                        Span::styled(moon.phase.name(), Style::default().fg(Color::Cyan)),
-                    ]),
-                    Line::from(format!("Age: {:.1} days", moon.age_days)),
-                    Line::from(format!("Illumination: {:.1}%", moon.illumination)),
-                    Line::from(vec![
-                        Span::raw("Language: "),
-                        Span::styled(language.name(), Style::default().fg(Color::Green)),
-                    ]),
-                    Line::from(""),
-                    Line::from(Span::styled("Use <Left>/<Right> date. <l> labels. <L> language. <i> toggle info. <q> quit.", Style::default().fg(Color::DarkGray))),
-                ];
-                
-                let info_block = Paragraph::new(info_text)
-                    .block(Block::default().title(" Details ").borders(Borders::ALL))
-                    .alignment(Alignment::Center);
-                f.render_widget(info_block, chunks[1]);
+                // Render Custom Moon Widget
+                f.render_widget(
+                    MoonWidget {
+                        status: MoonStatus {
+                            phase: moon.phase,
+                            phase_fraction: moon.phase_fraction,
+                            age_days: moon.age_days,
+                            illumination: moon.illumination,
+                        },
+                        show_labels,
+                        language,
+                    },
+                    chunks[0],
+                );
+
+                // Info Area
+                if show_info {
+                    let local_date: DateTime<Local> = DateTime::from(date);
+                    let mode = if follow_now { "Now (auto)" } else { "Manual" };
+                    let info_text = vec![
+                        Line::from(vec![
+                            Span::raw("Date: "),
+                            Span::styled(
+                                local_date.format("%Y-%m-%d").to_string(),
+                                Style::default().add_modifier(Modifier::BOLD),
+                            ),
+                        ]),
+                        Line::from(vec![
+                            Span::raw("Mode: "),
+                            Span::styled(mode, Style::default().fg(Color::Green)),
+                        ]),
+                        Line::from(vec![
+                            Span::raw("Phase: "),
+                            Span::styled(moon.phase.name(), Style::default().fg(Color::Cyan)),
+                        ]),
+                        Line::from(format!("Age: {:.1} days", moon.age_days)),
+                        Line::from(format!("Illumination: {:.1}%", moon.illumination)),
+                        Line::from(vec![
+                            Span::raw("Language: "),
+                            Span::styled(language.name(), Style::default().fg(Color::Green)),
+                        ]),
+                        Line::from(""),
+                        Line::from(Span::styled(
+                            "Use <Left>/<Right> date (switches to Manual). <l> labels. <L> language. <i> toggle info. <q> quit.",
+                            Style::default().fg(Color::DarkGray),
+                        )),
+                    ];
+
+                    let info_block = Paragraph::new(info_text)
+                        .block(Block::default().title(" Details ").borders(Borders::ALL))
+                        .alignment(Alignment::Center);
+                    f.render_widget(info_block, chunks[1]);
+                }
+            })?;
+            needs_redraw = false;
+        }
+
+        // Timer tick: refresh "now" periodically
+        if let Some(tick_rate) = tick_rate {
+            if last_tick.elapsed() >= tick_rate {
+                last_tick = Instant::now();
+                if follow_now {
+                    date = Utc::now();
+                }
+                needs_redraw = true;
             }
-        })?;
+        }
 
-        if event::poll(std::time::Duration::from_millis(100))?
-            && let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
-        {
-            match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                KeyCode::Char('l') => {
-                    show_labels = !show_labels;
+        // Wait for input/resize up to the next tick
+        let timeout = if let Some(tick_rate) = tick_rate {
+            tick_rate
+                .checked_sub(last_tick.elapsed())
+                .unwrap_or_else(|| std::time::Duration::from_secs(0))
+        } else {
+            std::time::Duration::from_millis(250)
+        };
+
+        if event::poll(timeout)? {
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                        KeyCode::Char('l') => {
+                            show_labels = !show_labels;
+                            needs_redraw = true;
+                        }
+                        KeyCode::Char('L') => {
+                            language = language.next();
+                            needs_redraw = true;
+                        }
+                        KeyCode::Char('i') => {
+                            show_info = !show_info;
+                            needs_redraw = true;
+                        }
+                        KeyCode::Left => {
+                            follow_now = false;
+                            date -= Duration::days(1);
+                            needs_redraw = true;
+                        }
+                        KeyCode::Right => {
+                            follow_now = false;
+                            date += Duration::days(1);
+                            needs_redraw = true;
+                        }
+                        _ => {}
+                    }
                 }
-                KeyCode::Char('L') => {
-                    language = language.next();
-                }
-                KeyCode::Char('i') => {
-                    show_info = !show_info;
-                }
-                KeyCode::Left => {
-                    date -= Duration::days(1);
-                }
-                KeyCode::Right => {
-                    date += Duration::days(1);
+                Event::Resize(_, _) => {
+                    needs_redraw = true;
                 }
                 _ => {}
             }
@@ -641,7 +706,7 @@ fn main() -> io::Result<()> {
     let args = Args::parse();
     
     // Parse date or use now
-    let date = match args.date {
+    let (date, follow_now) = match args.date {
         Some(d) => {
             let naive_date = NaiveDate::parse_from_str(&d, "%Y-%m-%d").map_err(|_| {
                 io::Error::new(
@@ -652,9 +717,9 @@ fn main() -> io::Result<()> {
             let naive = naive_date
                 .and_hms_opt(12, 0, 0)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid date"))?; // Midday
-            Utc.from_utc_datetime(&naive)
+            (Utc.from_utc_datetime(&naive), false)
         },
-        None => Utc::now(),
+        None => (Utc::now(), true),
     };
 
     if let Some(lines) = args.lines {
@@ -670,7 +735,7 @@ fn main() -> io::Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Run app
-    let res = run_app(&mut terminal, date);
+    let res = run_app(&mut terminal, date, follow_now, args.refresh_minutes);
 
     // Restore terminal
     disable_raw_mode()?;

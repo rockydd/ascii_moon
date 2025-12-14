@@ -14,3 +14,7 @@
 # Temp files
 *.log
 *.tmp
+# Artifacts
+moon*.gif
+moon*.cast
+

@@ -64,6 +64,14 @@ To see the moon on a specific date in interactive mode:
 ascii_moon --date YYYY-MM-DD
 ```
 
+By default (when `--date` is not provided), the TUI follows the current time and **auto-refreshes every 5 minutes**.
+You can change the refresh period (or disable it) with:
+
+```sh
+ascii_moon --refresh-minutes 5
+ascii_moon --refresh-minutes 0
+```
+
 ### Non-Interactive (Print) Mode
 
 For scripting or MOTD (Message of the Day) use, you can print the moon directly to the console. Use the `--lines` flag to specify the height of the output.
@@ -80,6 +88,7 @@ ascii_moon --lines 20
 *   **L**: Cycle through languages for the labels.
 *   **i**: Toggle the information panel.
 *   **q** or **<Esc>**: Quit the application.
+*   Note: Using **<Left>/<Right>** switches the app into **Manual** mode (stops following "Now").
 
 ## License
 
