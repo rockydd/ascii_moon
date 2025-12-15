@@ -82,14 +82,14 @@ ascii_moon --lines 20
 
 ### Controls (Interactive Mode)
 
-*   **<Left Arrow>**: Go back one day.
-*   **<Right Arrow>**: Go forward one day.
+*   **←**: Go back one day.
+*   **→**: Go forward one day.
 *   **n**: Switch back to **Now (auto)** mode (follows current time and auto-refreshes).
 *   **l**: Toggle labels for lunar features.
 *   **L**: Cycle through languages for the labels.
 *   **i**: Toggle the information panel.
 *   **q** or **<Esc>**: Quit the application.
-*   Note: Using **<Left>/<Right>** switches the app into **Manual** mode (stops following "Now").
+*   Note: Using **←/→** switches the app into **Manual** mode (stops following "Now").
 
 ## License
 
