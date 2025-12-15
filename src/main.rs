@@ -559,7 +559,7 @@ fn run_app<B: Backend>(
                         ]),
                         Line::from(""),
                         Line::from(Span::styled(
-                            "Use <Left>/<Right> date (switches to Manual). <l> labels. <L> language. <i> toggle info. <q> quit.",
+                            "Use <Left>/<Right> date (switches to Manual). <n> now (auto). <l> labels. <L> language. <i> toggle info. <q> quit.",
                             Style::default().fg(Color::DarkGray),
                         )),
                     ];
@@ -608,6 +608,12 @@ fn run_app<B: Backend>(
                         }
                         KeyCode::Char('i') => {
                             show_info = !show_info;
+                            needs_redraw = true;
+                        }
+                        KeyCode::Char('n') => {
+                            follow_now = true;
+                            date = Utc::now();
+                            last_tick = Instant::now();
                             needs_redraw = true;
                         }
                         KeyCode::Left => {

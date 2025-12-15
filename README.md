@@ -84,6 +84,7 @@ ascii_moon --lines 20
 
 *   **<Left Arrow>**: Go back one day.
 *   **<Right Arrow>**: Go forward one day.
+*   **n**: Switch back to **Now (auto)** mode (follows current time and auto-refreshes).
 *   **l**: Toggle labels for lunar features.
 *   **L**: Cycle through languages for the labels.
 *   **i**: Toggle the information panel.
