@@ -29,6 +29,10 @@ struct Args {
     /// Auto-refresh period in minutes in interactive mode (0 disables auto-refresh)
     #[arg(long, default_value_t = 5)]
     refresh_minutes: u64,
+
+    /// Hide the unlit (dark) part of the moon (renders shadow pixels as spaces)
+    #[arg(long, default_value_t = false)]
+    hide_dark: bool,
 }
 
 // Synodic month (new moon to new moon) in days (average; used only to express "age" in days)
@@ -327,6 +331,7 @@ struct MoonWidget {
     status: MoonStatus,
     show_labels: bool,
     language: Language,
+    hide_dark: bool,
 }
 
 impl Widget for MoonWidget {
@@ -435,8 +440,10 @@ impl Widget for MoonWidget {
                 if intensity > 0.0 {
                      buf.get_mut(x, y).set_char(ch).set_fg(Color::Yellow);
                 } else {
-                    // Shadow (Earthshine)
-                    buf.get_mut(x, y).set_char(ch).set_fg(Color::DarkGray);
+                    if !self.hide_dark {
+                        // Shadow (Earthshine)
+                        buf.get_mut(x, y).set_char(ch).set_fg(Color::DarkGray);
+                    }
                 }
             }
         }
@@ -488,6 +495,7 @@ fn run_app<B: Backend>(
     mut date: DateTime<Utc>,
     mut follow_now: bool,
     refresh_minutes: u64,
+    mut hide_dark: bool,
 ) -> io::Result<()> {
     let mut show_labels = false;
     let mut show_info = true;
@@ -527,6 +535,7 @@ fn run_app<B: Backend>(
                         },
                         show_labels,
                         language,
+                        hide_dark,
                     },
                     chunks[0],
                 );
@@ -559,7 +568,7 @@ fn run_app<B: Backend>(
                         ]),
                         Line::from(""),
                         Line::from(Span::styled(
-                            "Use <Left>/<Right> date (switches to Manual). <n> now (auto). <l> labels. <L> language. <i> toggle info. <q> quit.",
+                            "Use <Left>/<Right> date (switches to Manual). <n> now (auto). <l> labels. <L> language. <d> hide dark. <i> toggle info. <q> quit.",
                             Style::default().fg(Color::DarkGray),
                         )),
                     ];
@@ -608,6 +617,10 @@ fn run_app<B: Backend>(
                         }
                         KeyCode::Char('i') => {
                             show_info = !show_info;
+                            needs_redraw = true;
+                        }
+                        KeyCode::Char('d') => {
+                            hide_dark = !hide_dark;
                             needs_redraw = true;
                         }
                         KeyCode::Char('n') => {
@@ -664,7 +677,7 @@ fn color_to_ansi_fg(color: Color) -> String {
     }
 }
 
-fn print_moon(lines: u16, date: DateTime<Utc>) -> io::Result<()> {
+fn print_moon(lines: u16, date: DateTime<Utc>, hide_dark: bool) -> io::Result<()> {
     let moon = calculate_moon_phase(date);
 
     // The moon art is roughly 160 chars wide and 80 chars high in the source.
@@ -684,6 +697,7 @@ fn print_moon(lines: u16, date: DateTime<Utc>) -> io::Result<()> {
         status: moon,
         show_labels: false,
         language: Language::English,
+        hide_dark,
     };
     widget.render(area, &mut buffer);
 
@@ -730,7 +744,7 @@ fn main() -> io::Result<()> {
 
     if let Some(lines) = args.lines {
         // Non-interactive print mode
-        return print_moon(lines, date);
+        return print_moon(lines, date, args.hide_dark);
     }
 
     // Setup terminal
@@ -741,7 +755,13 @@ fn main() -> io::Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Run app
-    let res = run_app(&mut terminal, date, follow_now, args.refresh_minutes);
+    let res = run_app(
+        &mut terminal,
+        date,
+        follow_now,
+        args.refresh_minutes,
+        args.hide_dark,
+    );
 
     // Restore terminal
     disable_raw_mode()?;

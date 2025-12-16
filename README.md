@@ -15,6 +15,7 @@ This project is heavily inspired by the beautiful website [asciimoon.com](https:
     *   Use the **Left** and **Right** arrow keys to travel through time day-by-day.
     *   Toggle labels for major lunar features with the **'l'** key.
     *   Cycle through multiple languages for labels (English, Chinese, French, Japanese, and Spanish) with the **'L'** key.
+    *   Toggle hiding the unlit (dark) part of the moon with the **'d'** key.
     *   Toggle the information panel with the **'i'** key.
 *   **Cross-Platform:** Works on Linux, macOS, and Windows.
 *   **Lightweight:** It's a single, small, native binary.
@@ -80,6 +81,12 @@ For scripting or MOTD (Message of the Day) use, you can print the moon directly 
 ascii_moon --lines 20
 ```
 
+To hide the unlit (dark) part in print mode:
+
+```sh
+ascii_moon --lines 20 --hide-dark
+```
+
 ### Controls (Interactive Mode)
 
 *   **←**: Go back one day.
@@ -87,6 +94,7 @@ ascii_moon --lines 20
 *   **n**: Switch back to **Now (auto)** mode (follows current time and auto-refreshes).
 *   **l**: Toggle labels for lunar features.
 *   **L**: Cycle through languages for the labels.
+*   **d**: Toggle hiding the unlit (dark) part of the moon.
 *   **i**: Toggle the information panel.
 *   **q** or **<Esc>**: Quit the application.
 *   Note: Using **←/→** switches the app into **Manual** mode (stops following "Now").
