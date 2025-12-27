@@ -576,8 +576,15 @@ fn sprinkle_twinkles(buf: &mut Buffer, area: Rect, seed0: u64, glow_phase: u64) 
     let (_, _, dim_c) = soft_palette(glow_phase);
     let mut seed = seed0 ^ glow_phase.rotate_left(17);
 
-    // Keep it sparse and slow-moving: 2-4 twinkles per frame.
-    let count = 2 + (lcg_next_u32(&mut seed) as usize % 3);
+    // Keep it sparse and slow-moving.
+    //
+    // IMPORTANT: We intentionally "quantize" the phase so twinkles don't jump every frame.
+    // glow_phase increments every ~120ms; dividing by 8 makes twinkles drift about ~1s.
+    let twinkle_phase = glow_phase / 8;
+    seed ^= twinkle_phase.rotate_left(9);
+
+    // 1-3 twinkles per frame.
+    let count = 1 + (lcg_next_u32(&mut seed) as usize % 3);
     for _ in 0..count {
         let x = area.left() + (lcg_next_u32(&mut seed) as u16 % area.width);
         let y = area.top() + (lcg_next_u32(&mut seed) as u16 % area.height);
