@@ -16,6 +16,7 @@ This project is heavily inspired by the beautiful website [asciimoon.com](https:
     *   Toggle labels for major lunar features with the **'l'** key.
     *   Cycle through multiple languages for labels (English, Chinese, French, Japanese, and Spanish) with the **'L'** key.
     *   Toggle hiding the unlit (dark) part of the moon with the **'d'** key.
+    *   Toggle a **Moon Poem** panel (matching the current language) with the **'p'** key, and pick a new random poem with **'P'**.
     *   Toggle the information panel with the **'i'** key.
 *   **Cross-Platform:** Works on Linux, macOS, and Windows.
 *   **Lightweight:** It's a single, small, native binary.
@@ -95,6 +96,8 @@ ascii_moon --lines 20 --hide-dark
 *   **l**: Toggle labels for lunar features.
 *   **L**: Cycle through languages for the labels.
 *   **d**: Toggle hiding the unlit (dark) part of the moon.
+*   **p**: Toggle the Moon Poem panel (animated, language-matched).
+*   **P**: Pick a new random poem (current language).
 *   **i**: Toggle the information panel.
 *   **q** or **<Esc>**: Quit the application.
 *   Note: Using **←/→** switches the app into **Manual** mode (stops following "Now").
