@@ -52,6 +52,32 @@ cargo build --release
 
 ## Usage
 
+## Custom Poems
+
+`ascii_moon` can load moon poems from a folder on disk, so you can add your own poems easily.
+
+- **Default**: looks for `./poems/` (relative to where you run the command)
+- **Override**: pass `--poems-dir /path/to/poems`
+
+### Folder layout
+
+Create subfolders by language:
+
+- `poems/en/`
+- `poems/zh/`
+- `poems/fr/`
+- `poems/ja/`
+- `poems/es/`
+
+### File format (`.txt`)
+
+Each poem file is simple:
+
+- Line 1: **Title**
+- Line 2: **Author**
+- Line 3: `---`
+- Remaining lines: poem body
+
 ### Interactive Mode
 
 Run the application without arguments to launch the full-screen interactive TUI:

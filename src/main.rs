@@ -5,15 +5,19 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use rand::seq::SliceRandom;
 use ratatui::{
     backend::Backend,
     prelude::*,
     widgets::{Block, Borders, Paragraph},
 };
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::time::Instant;
 use unicode_width::UnicodeWidthStr;
+
+mod poems;
+
+use poems::{Poem, PoemLibrary};
 
 /// A TUI to show the moon phase.
 #[derive(Parser, Debug)]
@@ -34,6 +38,10 @@ struct Args {
     /// Hide the unlit (dark) part of the moon (renders shadow pixels as spaces)
     #[arg(long, default_value_t = false)]
     hide_dark: bool,
+
+    /// Directory containing poem files (defaults to ./poems). Subfolders: en, zh, fr, ja, es
+    #[arg(long)]
+    poems_dir: Option<PathBuf>,
 }
 
 // Synodic month (new moon to new moon) in days (average; used only to express "age" in days)
@@ -176,158 +184,6 @@ impl Language {
             Language::Spanish => "Español",
         }
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct Poem {
-    title: &'static str,
-    author: &'static str,
-    // Keep as a slice of lines so we can render/animate cleanly in a terminal.
-    lines: &'static [&'static str],
-}
-
-const POEMS_EN: &[Poem] = &[
-    Poem {
-        title: "The Moon",
-        author: "Robert Louis Stevenson",
-        lines: &[
-            "The moon has a face like the clock in the hall;",
-            "She shines on thieves on the garden wall,",
-            "On streets and fields and harbor quays,",
-            "And birdies asleep in the forks of the trees.",
-        ],
-    },
-    Poem {
-        title: "To the Moon (excerpt)",
-        author: "Percy Bysshe Shelley",
-        lines: &[
-            "Art thou pale for weariness",
-            "Of climbing heaven and gazing on the earth,",
-            "Wandering companionless",
-            "Among the stars that have a different birth,",
-        ],
-    },
-];
-
-const POEMS_ZH: &[Poem] = &[
-    Poem {
-        title: "静夜思",
-        author: "李白",
-        lines: &[
-            "床前明月光，",
-            "疑是地上霜。",
-            "举头望明月，",
-            "低头思故乡。",
-        ],
-    },
-    Poem {
-        title: "望月怀远",
-        author: "张九龄",
-        lines: &[
-            "海上生明月，",
-            "天涯共此时。",
-            "情人怨遥夜，",
-            "竟夕起相思。",
-        ],
-    },
-    Poem {
-        title: "水调歌头·明月几时有（节选）",
-        author: "苏轼",
-        lines: &[
-            "明月几时有？把酒问青天。",
-            "不知天上宫阙，今夕是何年。",
-            "但愿人长久，千里共婵娟。",
-        ],
-    },
-];
-
-const POEMS_FR: &[Poem] = &[
-    Poem {
-        title: "Clair de lune (excerpt)",
-        author: "Paul Verlaine",
-        lines: &[
-            "Votre âme est un paysage choisi",
-            "Que vont charmant masques et bergamasques,",
-            "Jouant du luth et dansant et quasi",
-            "Tristes sous leurs déguisements fantasques.",
-        ],
-    },
-    Poem {
-        title: "Au clair de la lune",
-        author: "Chanson traditionnelle",
-        lines: &[
-            "Au clair de la lune,",
-            "Mon ami Pierrot,",
-            "Prête-moi ta plume",
-            "Pour écrire un mot.",
-        ],
-    },
-];
-
-const POEMS_JA: &[Poem] = &[
-    Poem {
-        title: "名月や",
-        author: "松尾芭蕉",
-        lines: &[
-            "名月や",
-            "池をめぐりて",
-            "夜もすがら",
-        ],
-    },
-    Poem {
-        title: "名月を",
-        author: "小林一茶",
-        lines: &[
-            "名月を",
-            "取ってくれろと",
-            "泣く子かな",
-        ],
-    },
-];
-
-const POEMS_ES: &[Poem] = &[
-    Poem {
-        title: "Romance de la luna, luna (excerpt)",
-        author: "Federico García Lorca",
-        lines: &[
-            "La luna vino a la fragua",
-            "con su polisón de nardos.",
-            "El niño la mira mira.",
-            "El niño la está mirando.",
-        ],
-    },
-    Poem {
-        title: "Luna, lunera",
-        author: "Rima tradicional",
-        lines: &[
-            "Luna, lunera,",
-            "cascabelera,",
-            "debajo de la cama",
-            "tienes la cena.",
-        ],
-    },
-];
-
-fn poems_for_language(lang: Language) -> &'static [Poem] {
-    match lang {
-        Language::English => POEMS_EN,
-        Language::Chinese => POEMS_ZH,
-        Language::French => POEMS_FR,
-        Language::Japanese => POEMS_JA,
-        Language::Spanish => POEMS_ES,
-    }
-}
-
-fn random_poem(lang: Language) -> Poem {
-    let poems = poems_for_language(lang);
-    let mut rng = rand::thread_rng();
-    *poems
-        .choose(&mut rng)
-        .unwrap_or(&Poem {
-            title: "Moon",
-            author: "",
-            lines: &["(no poems available)"],
-        })
 }
 
 struct Feature {
@@ -495,6 +351,17 @@ struct PoemViewState {
     last_anim: Instant,
     last_reveal: Instant,
     twinkle_seed: u64,
+    twinkles: Vec<Twinkle>,
+}
+
+#[derive(Debug, Clone)]
+struct Twinkle {
+    // Stored as coordinates relative to the poem inner area (0..w-1, 0..h-1).
+    x: u16,
+    y: u16,
+    ttl: u16,
+    max_ttl: u16,
+    kind: u8,
 }
 
 fn lcg_next_u32(seed: &mut u64) -> u32 {
@@ -528,12 +395,12 @@ fn soft_palette(glow_phase: u64) -> (Color, Color, Color) {
     }
 }
 
-fn render_poem_lines_soft(poem: Poem, revealed_lines: usize, glow_phase: u64) -> Vec<Line<'static>> {
+fn render_poem_lines_soft(poem: &Poem, revealed_lines: usize, glow_phase: u64) -> Vec<Line<'static>> {
     let (title_c, body_c, dim_c) = soft_palette(glow_phase);
     let mut out: Vec<Line> = Vec::new();
 
     out.push(Line::from(Span::styled(
-        poem.title,
+        poem.title.clone(),
         Style::default()
             .fg(title_c)
             .add_modifier(Modifier::BOLD)
@@ -551,10 +418,10 @@ fn render_poem_lines_soft(poem: Poem, revealed_lines: usize, glow_phase: u64) ->
 
     out.push(Line::from(""));
 
-    for (i, &line) in poem.lines.iter().enumerate() {
+    for (i, line) in poem.lines.iter().enumerate() {
         if i < revealed_lines {
             out.push(Line::from(Span::styled(
-                line,
+                line.clone(),
                 Style::default().fg(body_c).add_modifier(Modifier::ITALIC),
             )));
         } else {
@@ -568,48 +435,89 @@ fn render_poem_lines_soft(poem: Poem, revealed_lines: usize, glow_phase: u64) ->
     out
 }
 
-fn sprinkle_twinkles(buf: &mut Buffer, area: Rect, seed0: u64, glow_phase: u64) {
-    // Draw a few dim twinkles *only* on blank cells so we don't overwrite poem text.
-    if area.width < 4 || area.height < 4 {
+fn twinkle_char(kind: u8) -> char {
+    match kind % 4 {
+        0 => '·',
+        1 => '⋅',
+        2 => '.',
+        _ => '˙',
+    }
+}
+
+fn update_twinkles(twinkles: &mut Vec<Twinkle>, seed: &mut u64, area: Rect) {
+    // Maintain a small, persistent field of twinkles that fade slowly.
+    // This avoids the "pop in/pop out" effect.
+    if area.width < 6 || area.height < 6 {
+        twinkles.clear();
         return;
     }
-    let (_, _, dim_c) = soft_palette(glow_phase);
-    let mut seed = seed0 ^ glow_phase.rotate_left(17);
 
-    // Keep it sparse and slow-moving.
+    // Decay
+    for t in twinkles.iter_mut() {
+        t.ttl = t.ttl.saturating_sub(1);
+        // Keep within bounds if the pane resizes
+        t.x = t.x.min(area.width.saturating_sub(1));
+        t.y = t.y.min(area.height.saturating_sub(1));
+    }
+    twinkles.retain(|t| t.ttl > 0);
+
+    // Target density: scale gently with pane size so larger terminals feel more "starry"
+    // without becoming noisy.
     //
-    // IMPORTANT: We intentionally "quantize" the phase so twinkles don't jump every frame.
-    // glow_phase increments every ~120ms; dividing by 8 makes twinkles drift about ~1s.
-    let twinkle_phase = glow_phase / 8;
-    seed ^= twinkle_phase.rotate_left(9);
+    // Roughly: one twinkle per ~90 cells, clamped to a tasteful range.
+    let cells = area.width as usize * area.height as usize;
+    let base = (cells / 90).clamp(10, 22);
+    let jitter = lcg_next_u32(seed) as usize % 4; // +0..3
+    let target = base + jitter;
+    while twinkles.len() < target {
+        // Spawn away from borders so it feels like "in the sky", not hugging the frame.
+        let x = 1 + (lcg_next_u32(seed) as u16 % area.width.saturating_sub(2));
+        let y = 1 + (lcg_next_u32(seed) as u16 % area.height.saturating_sub(2));
+        let max_ttl = 28 + (lcg_next_u32(seed) as u16 % 26); // 28..53 ticks (~3.4s..6.4s at 120ms)
+        let kind = (lcg_next_u32(seed) % 4) as u8;
+        twinkles.push(Twinkle {
+            x,
+            y,
+            ttl: max_ttl,
+            max_ttl,
+            kind,
+        });
+    }
+}
 
-    // 1-3 twinkles per frame.
-    let count = 1 + (lcg_next_u32(&mut seed) as usize % 3);
-    for _ in 0..count {
-        let x = area.left() + (lcg_next_u32(&mut seed) as u16 % area.width);
-        let y = area.top() + (lcg_next_u32(&mut seed) as u16 % area.height);
+fn render_twinkles(buf: &mut Buffer, area: Rect, twinkles: &[Twinkle], glow_phase: u64) {
+    // Draw twinkles *only* on blank cells so we don't overwrite poem text.
+    let (_, _, dim_c) = soft_palette(glow_phase);
+    for t in twinkles {
+        let x = area.left() + t.x;
+        let y = area.top() + t.y;
         if x <= area.left() || x + 1 >= area.right() || y <= area.top() || y + 1 >= area.bottom()
         {
             continue;
         }
 
-        let cell = buf.get(x, y);
-        if cell.symbol() == " " {
-            let ch = match (lcg_next_u32(&mut seed) % 5) as u8 {
-                0 => '·',
-                1 => '⋅',
-                2 => '.',
-                3 => '˙',
-                _ => ' ',
-            };
-            if ch != ' ' {
-                buf.get_mut(x, y).set_char(ch).set_style(
-                    Style::default()
-                        .fg(dim_c)
-                        .add_modifier(Modifier::DIM),
-                );
-            }
+        if buf.get(x, y).symbol() != " " {
+            continue;
         }
+
+        // Soft fade: brighter in the middle, dim at start/end.
+        let age = t.max_ttl.saturating_sub(t.ttl);
+        let half = t.max_ttl / 2;
+        let intensity = if half == 0 {
+            0
+        } else if age <= half {
+            age
+        } else {
+            t.ttl
+        };
+
+        let style = if intensity >= half.saturating_sub(2) {
+            Style::default().fg(dim_c)
+        } else {
+            Style::default().fg(dim_c).add_modifier(Modifier::DIM)
+        };
+
+        buf.get_mut(x, y).set_char(twinkle_char(t.kind)).set_style(style);
     }
 }
 
@@ -769,24 +677,40 @@ impl Widget for MoonWidget {
     }
 }
 
+fn placeholder_poem() -> Poem {
+    Poem {
+        title: "Moon".to_string(),
+        author: "".to_string(),
+        lines: vec!["(no poems found)".to_string()],
+    }
+}
+
+fn pick_poem(lib: &PoemLibrary, lang: Language) -> Poem {
+    lib.random_poem(lang).unwrap_or_else(placeholder_poem)
+}
+
 fn run_app<B: Backend>(
     terminal: &mut Terminal<B>,
     mut date: DateTime<Utc>,
     mut follow_now: bool,
     refresh_minutes: u64,
     mut hide_dark: bool,
+    poems_dir: Option<PathBuf>,
 ) -> io::Result<()> {
     let mut show_labels = false;
     let mut show_info = true;
     let mut language = Language::English;
     let mut show_poem = false;
+
+    let poem_library = poems::load_poems(poems_dir.as_deref());
     let mut poem_state = PoemViewState {
-        poem: random_poem(language),
+        poem: pick_poem(&poem_library, language),
         revealed_lines: 0,
         glow_phase: 0,
         last_anim: Instant::now(),
         last_reveal: Instant::now(),
         twinkle_seed: rand::random::<u64>(),
+        twinkles: Vec::new(),
     };
     let tick_rate = if refresh_minutes == 0 {
         None
@@ -869,7 +793,7 @@ fn run_app<B: Backend>(
 
                     if inner.width >= 2 && inner.height >= 2 {
                         let poem_lines = render_poem_lines_soft(
-                            poem_state.poem,
+                            &poem_state.poem,
                             poem_state.revealed_lines,
                             poem_state.glow_phase,
                         );
@@ -879,10 +803,11 @@ fn run_app<B: Backend>(
                             .wrap(ratatui::widgets::Wrap { trim: false });
                         f.render_widget(paragraph, inner);
 
-                        // Overlay subtle twinkles on blank space.
-                        // We do this after rendering the paragraph so we can check for blank cells.
+                        // Persistent twinkles on blank space.
+                        // We update based on the current pane size, then render after poem text.
+                        update_twinkles(&mut poem_state.twinkles, &mut poem_state.twinkle_seed, inner);
                         let buf = f.buffer_mut();
-                        sprinkle_twinkles(buf, inner, poem_state.twinkle_seed, poem_state.glow_phase);
+                        render_twinkles(buf, inner, &poem_state.twinkles, poem_state.glow_phase);
                     }
                 }
 
@@ -968,12 +893,13 @@ fn run_app<B: Backend>(
                         KeyCode::Char('L') => {
                             language = language.next();
                             if show_poem {
-                                poem_state.poem = random_poem(language);
+                                poem_state.poem = pick_poem(&poem_library, language);
                                 poem_state.revealed_lines = 0;
                                 poem_state.glow_phase = 0;
                                 poem_state.last_anim = Instant::now();
                                 poem_state.last_reveal = Instant::now();
                                 poem_state.twinkle_seed = rand::random::<u64>();
+                                poem_state.twinkles.clear();
                             }
                             needs_redraw = true;
                         }
@@ -988,23 +914,25 @@ fn run_app<B: Backend>(
                         KeyCode::Char('p') => {
                             show_poem = !show_poem;
                             if show_poem {
-                                poem_state.poem = random_poem(language);
+                                poem_state.poem = pick_poem(&poem_library, language);
                                 poem_state.revealed_lines = 0;
                                 poem_state.glow_phase = 0;
                                 poem_state.last_anim = Instant::now();
                                 poem_state.last_reveal = Instant::now();
                                 poem_state.twinkle_seed = rand::random::<u64>();
+                                poem_state.twinkles.clear();
                             }
                             needs_redraw = true;
                         }
                         KeyCode::Char('P') => {
                             if show_poem {
-                                poem_state.poem = random_poem(language);
+                                poem_state.poem = pick_poem(&poem_library, language);
                                 poem_state.revealed_lines = 0;
                                 poem_state.glow_phase = 0;
                                 poem_state.last_anim = Instant::now();
                                 poem_state.last_reveal = Instant::now();
                                 poem_state.twinkle_seed = rand::random::<u64>();
+                                poem_state.twinkles.clear();
                                 needs_redraw = true;
                             }
                         }
@@ -1146,6 +1074,7 @@ fn main() -> io::Result<()> {
         follow_now,
         args.refresh_minutes,
         args.hide_dark,
+        args.poems_dir.clone(),
     );
 
     // Restore terminal
