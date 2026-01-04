@@ -78,6 +78,15 @@ Each poem file is simple:
 - Line 3: `---`
 - Remaining lines: poem body
 
+## Theme (white terminal background)
+
+If your terminal uses a **light/white** background, the default “soft pastel” poem colors may look too faint.
+Use:
+
+- `--theme light` for higher-contrast poem colors on white backgrounds
+- `--theme dark` for dark terminals
+- `--theme auto` (default) tries to infer from `COLORFGBG` when available
+
 ### Interactive Mode
 
 Run the application without arguments to launch the full-screen interactive TUI:

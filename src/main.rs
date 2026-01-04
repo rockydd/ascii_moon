@@ -8,7 +8,7 @@ use crossterm::{
 use ratatui::{
     backend::Backend,
     prelude::*,
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
 };
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -18,6 +18,59 @@ use unicode_width::UnicodeWidthStr;
 mod poems;
 
 use poems::{Poem, PoemLibrary};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Theme {
+    Auto,
+    Dark,
+    Light,
+}
+
+impl std::str::FromStr for Theme {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "auto" => Ok(Theme::Auto),
+            "dark" => Ok(Theme::Dark),
+            "light" => Ok(Theme::Light),
+            _ => Err("theme must be one of: auto, dark, light".to_string()),
+        }
+    }
+}
+
+fn detect_light_terminal_background() -> Option<bool> {
+    // Heuristic: some terminals expose ANSI color indices via COLORFGBG="fg;bg" (or "fg:bg").
+    // We treat bg 7/15 as "light background".
+    let s = std::env::var("COLORFGBG").ok()?;
+    let parts: Vec<&str> = s.split(|c| c == ';' || c == ':').collect();
+    let bg = parts.last()?.trim().parse::<u16>().ok()?;
+    Some(bg == 7 || bg == 15)
+}
+
+fn resolve_theme(theme: Theme) -> Theme {
+    match theme {
+        Theme::Auto => {
+            if detect_light_terminal_background() == Some(true) {
+                Theme::Light
+            } else {
+                Theme::Dark
+            }
+        }
+        other => other,
+    }
+}
+
+fn supports_truecolor() -> bool {
+    // Most terminals that support 24-bit color set COLORTERM=truecolor (or 24bit).
+    // iTerm does; macOS Terminal often does not.
+    if let Ok(v) = std::env::var("COLORTERM") {
+        let v = v.to_ascii_lowercase();
+        if v.contains("truecolor") || v.contains("24bit") {
+            return true;
+        }
+    }
+    false
+}
 
 /// A TUI to show the moon phase.
 #[derive(Parser, Debug)]
@@ -42,6 +95,10 @@ struct Args {
     /// Directory containing poem files (defaults to ./poems). Subfolders: en, zh, fr, ja, es
     #[arg(long)]
     poems_dir: Option<PathBuf>,
+
+    /// Poem panel theme: auto (default), dark, or light
+    #[arg(long, default_value = "auto")]
+    theme: Theme,
 }
 
 // Synodic month (new moon to new moon) in days (average; used only to express "age" in days)
@@ -127,6 +184,24 @@ const MOON_ART_RAW: &str = r#"                                                  
                                                                      .(((##(##%%%#%%%%%%%%%%%#%%##%%%%#((####(((((((((((/((((((////,                                                                    
                                                                               */(%%%%%%%%%##%##########(/(((/(((((////////.                                                                             
 "#;
+
+fn moon_lit_color(truecolor: bool) -> Color {
+    if truecolor {
+        Color::Rgb(232, 208, 88) // warm moonlight
+    } else {
+        // 256-color gold. Important for terminals that don't parse 24-bit SGR (38;2;...),
+        // which can otherwise degrade to green (color index 2).
+        Color::Indexed(214)
+    }
+}
+
+fn moon_shadow_color(truecolor: bool) -> Color {
+    if truecolor {
+        Color::Rgb(92, 92, 98) // soft graphite
+    } else {
+        Color::Indexed(242)
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 enum MoonPhase {
@@ -341,6 +416,7 @@ struct MoonWidget {
     show_labels: bool,
     language: Language,
     hide_dark: bool,
+    truecolor: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -362,7 +438,6 @@ struct Twinkle {
     x: u16,
     y: u16,
     ttl: u16,
-    max_ttl: u16,
     kind: u8,
 }
 
@@ -405,16 +480,68 @@ fn reset_poem_fade(state: &mut PoemViewState) {
     state.fade_step = 0;
 }
 
-fn render_poem_lines_soft(poem: &Poem, line_fade: &[u8], glow_phase: u64) -> Vec<Line<'static>> {
-    let (title_c, body_c, dim_c) = soft_palette(glow_phase);
+fn soft_palette_for_theme(glow_phase: u64, theme: Theme, truecolor: bool) -> (Color, Color, Color) {
+    match theme {
+        Theme::Light => {
+            // Higher contrast on light terminals.
+            let step = (glow_phase / 16) % 3;
+            if truecolor {
+                match step {
+                    0 => (
+                        Color::Rgb(92, 40, 88),   // title: plum
+                        Color::Rgb(52, 62, 120),  // body: deep indigo
+                        Color::Rgb(95, 95, 105),  // dim: graphite
+                    ),
+                    1 => (
+                        Color::Rgb(70, 45, 115),
+                        Color::Rgb(40, 75, 130),
+                        Color::Rgb(90, 90, 100),
+                    ),
+                    _ => (
+                        Color::Rgb(110, 40, 70),
+                        Color::Rgb(65, 55, 120),
+                        Color::Rgb(95, 95, 105),
+                    ),
+                }
+            } else {
+                // 256-color approximations for light backgrounds.
+                match step {
+                    0 => (Color::Indexed(90), Color::Indexed(25), Color::Indexed(244)),
+                    1 => (Color::Indexed(91), Color::Indexed(24), Color::Indexed(244)),
+                    _ => (Color::Indexed(89), Color::Indexed(61), Color::Indexed(244)),
+                }
+            }
+        }
+        _ => {
+            if truecolor {
+                soft_palette(glow_phase)
+            } else {
+                // 256-color "romantic" palette for dark terminals.
+                let step = (glow_phase / 16) % 3;
+                match step {
+                    0 => (Color::Indexed(212), Color::Indexed(110), Color::Indexed(245)),
+                    1 => (Color::Indexed(213), Color::Indexed(111), Color::Indexed(245)),
+                    _ => (Color::Indexed(211), Color::Indexed(109), Color::Indexed(245)),
+                }
+            }
+        }
+    }
+}
+
+fn render_poem_lines_soft(
+    poem: &Poem,
+    line_fade: &[u8],
+    glow_phase: u64,
+    theme: Theme,
+    truecolor: bool,
+) -> Vec<Line<'static>> {
+    let (title_c, body_c, dim_c) = soft_palette_for_theme(glow_phase, theme, truecolor);
     let mut out: Vec<Line> = Vec::new();
 
     out.push(Line::from(Span::styled(
         poem.title.clone(),
-        Style::default()
-            .fg(title_c)
-            .add_modifier(Modifier::BOLD)
-            .add_modifier(Modifier::ITALIC),
+        // Avoid BOLD/ITALIC: Terminal.app can remap "bright colors" unexpectedly.
+        Style::default().fg(title_c),
     )));
 
     if poem.author.is_empty() {
@@ -422,7 +549,7 @@ fn render_poem_lines_soft(poem: &Poem, line_fade: &[u8], glow_phase: u64) -> Vec
     } else {
         out.push(Line::from(Span::styled(
             format!("— {}", poem.author),
-            Style::default().fg(dim_c).add_modifier(Modifier::ITALIC),
+            Style::default().fg(dim_c),
         )));
     }
 
@@ -435,11 +562,12 @@ fn render_poem_lines_soft(poem: &Poem, line_fade: &[u8], glow_phase: u64) -> Vec
             continue;
         }
 
-        let mut style = Style::default().fg(body_c).add_modifier(Modifier::ITALIC);
-        // Soft fade: start dim, then become normal.
-        if level < (LINE_FADE_STEPS / 2).max(1) {
-            style = style.add_modifier(Modifier::DIM);
-        }
+        // Fade without DIM/BOLD/ITALIC: use dim color first, then body color.
+        let style = if level < (LINE_FADE_STEPS / 2).max(1) {
+            Style::default().fg(dim_c)
+        } else {
+            Style::default().fg(body_c)
+        };
 
         {
             out.push(Line::from(Span::styled(
@@ -496,15 +624,21 @@ fn update_twinkles(twinkles: &mut Vec<Twinkle>, seed: &mut u64, area: Rect) {
             x,
             y,
             ttl: max_ttl,
-            max_ttl,
             kind,
         });
     }
 }
 
-fn render_twinkles(buf: &mut Buffer, area: Rect, twinkles: &[Twinkle], glow_phase: u64) {
+fn render_twinkles(
+    buf: &mut Buffer,
+    area: Rect,
+    twinkles: &[Twinkle],
+    glow_phase: u64,
+    theme: Theme,
+    truecolor: bool,
+) {
     // Draw twinkles *only* on blank cells so we don't overwrite poem text.
-    let (_, _, dim_c) = soft_palette(glow_phase);
+    let (_, _, dim_c) = soft_palette_for_theme(glow_phase, theme, truecolor);
     for t in twinkles {
         let x = area.left() + t.x;
         let y = area.top() + t.y;
@@ -517,22 +651,8 @@ fn render_twinkles(buf: &mut Buffer, area: Rect, twinkles: &[Twinkle], glow_phas
             continue;
         }
 
-        // Soft fade: brighter in the middle, dim at start/end.
-        let age = t.max_ttl.saturating_sub(t.ttl);
-        let half = t.max_ttl / 2;
-        let intensity = if half == 0 {
-            0
-        } else if age <= half {
-            age
-        } else {
-            t.ttl
-        };
-
-        let style = if intensity >= half.saturating_sub(2) {
-            Style::default().fg(dim_c)
-        } else {
-            Style::default().fg(dim_c).add_modifier(Modifier::DIM)
-        };
+        // Keep it subtle; avoid BOLD/DIM modifiers for Terminal.app.
+        let style = Style::default().fg(dim_c);
 
         buf.get_mut(x, y).set_char(twinkle_char(t.kind)).set_style(style);
     }
@@ -642,12 +762,16 @@ impl Widget for MoonWidget {
                 let intensity = u * sun_x + z * sun_z;
 
                 if intensity > 0.0 {
-                     buf.get_mut(x, y).set_char(ch).set_fg(Color::Yellow);
-                } else {
-                    if !self.hide_dark {
-                        // Shadow (Earthshine)
-                        buf.get_mut(x, y).set_char(ch).set_fg(Color::DarkGray);
-                    }
+                    // IMPORTANT: set full style to avoid attribute "leakage" (DIM/BOLD/ITALIC)
+                    // when the layout changes (e.g. poem panel toggled).
+                    buf.get_mut(x, y)
+                        .set_char(ch)
+                        .set_style(Style::default().fg(moon_lit_color(self.truecolor)));
+                } else if !self.hide_dark {
+                    // Shadow (Earthshine)
+                    buf.get_mut(x, y)
+                        .set_char(ch)
+                        .set_style(Style::default().fg(moon_shadow_color(self.truecolor)));
                 }
             }
         }
@@ -713,12 +837,15 @@ fn run_app<B: Backend>(
     refresh_minutes: u64,
     mut hide_dark: bool,
     poems_dir: Option<PathBuf>,
+    theme: Theme,
 ) -> io::Result<()> {
     let mut show_labels = false;
     let mut show_info = true;
     let mut language = Language::English;
     let mut show_poem = false;
 
+    let theme = resolve_theme(theme);
+    let truecolor = supports_truecolor();
     let poem_library = poems::load_poems(poems_dir.as_deref());
     let mut poem_state = PoemViewState {
         poem: pick_poem(&poem_library, language),
@@ -763,6 +890,10 @@ fn run_app<B: Backend>(
 
         if needs_redraw {
             terminal.draw(|f| {
+                // Clear the whole frame first so style modifiers from the previous layout
+                // can't affect the new layout (macOS Terminal is especially sensitive to this).
+                f.render_widget(Clear, f.size());
+
                 let constraints = if show_info {
                     vec![Constraint::Percentage(80), Constraint::Percentage(20)]
                 } else {
@@ -800,12 +931,14 @@ fn run_app<B: Backend>(
                         show_labels,
                         language,
                         hide_dark,
+                        truecolor,
                     },
                     main_cols[0],
                 );
 
                 if show_poem {
-                    let (title_c, _, dim_c) = soft_palette(poem_state.glow_phase);
+                    let (title_c, _, dim_c) =
+                        soft_palette_for_theme(poem_state.glow_phase, theme, truecolor);
                     let border_style = Style::default().fg(title_c);
                     let block = Block::default()
                         .title(" Moon Poem ")
@@ -819,6 +952,8 @@ fn run_app<B: Backend>(
                             &poem_state.poem,
                             &poem_state.line_fade,
                             poem_state.glow_phase,
+                            theme,
+                            truecolor,
                         );
                         let paragraph = Paragraph::new(poem_lines)
                             .alignment(Alignment::Left)
@@ -830,7 +965,14 @@ fn run_app<B: Backend>(
                         // We update based on the current pane size, then render after poem text.
                         update_twinkles(&mut poem_state.twinkles, &mut poem_state.twinkle_seed, inner);
                         let buf = f.buffer_mut();
-                        render_twinkles(buf, inner, &poem_state.twinkles, poem_state.glow_phase);
+                        render_twinkles(
+                            buf,
+                            inner,
+                            &poem_state.twinkles,
+                            poem_state.glow_phase,
+                            theme,
+                            truecolor,
+                        );
                     }
                 }
 
@@ -1031,6 +1173,7 @@ fn print_moon(lines: u16, date: DateTime<Utc>, hide_dark: bool) -> io::Result<()
         show_labels: false,
         language: Language::English,
         hide_dark,
+        truecolor: supports_truecolor(),
     };
     widget.render(area, &mut buffer);
 
@@ -1095,6 +1238,7 @@ fn main() -> io::Result<()> {
         args.refresh_minutes,
         args.hide_dark,
         args.poems_dir.clone(),
+        args.theme,
     );
 
     // Restore terminal
