@@ -346,12 +346,14 @@ struct MoonWidget {
 #[derive(Debug, Clone)]
 struct PoemViewState {
     poem: Poem,
-    revealed_lines: usize,
     glow_phase: u64,
     last_anim: Instant,
-    last_reveal: Instant,
     twinkle_seed: u64,
     twinkles: Vec<Twinkle>,
+    // Fade-in state for poem body lines: 0..=LINE_FADE_STEPS.
+    line_fade: Vec<u8>,
+    fade_idx: usize,
+    fade_step: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -395,7 +397,15 @@ fn soft_palette(glow_phase: u64) -> (Color, Color, Color) {
     }
 }
 
-fn render_poem_lines_soft(poem: &Poem, revealed_lines: usize, glow_phase: u64) -> Vec<Line<'static>> {
+const LINE_FADE_STEPS: u8 = 6;
+
+fn reset_poem_fade(state: &mut PoemViewState) {
+    state.line_fade = vec![0; state.poem.lines.len()];
+    state.fade_idx = 0;
+    state.fade_step = 0;
+}
+
+fn render_poem_lines_soft(poem: &Poem, line_fade: &[u8], glow_phase: u64) -> Vec<Line<'static>> {
     let (title_c, body_c, dim_c) = soft_palette(glow_phase);
     let mut out: Vec<Line> = Vec::new();
 
@@ -419,15 +429,22 @@ fn render_poem_lines_soft(poem: &Poem, revealed_lines: usize, glow_phase: u64) -
     out.push(Line::from(""));
 
     for (i, line) in poem.lines.iter().enumerate() {
-        if i < revealed_lines {
+        let level = line_fade.get(i).copied().unwrap_or(0).min(LINE_FADE_STEPS);
+        if level == 0 {
+            out.push(Line::from(Span::styled("", Style::default().fg(dim_c))));
+            continue;
+        }
+
+        let mut style = Style::default().fg(body_c).add_modifier(Modifier::ITALIC);
+        // Soft fade: start dim, then become normal.
+        if level < (LINE_FADE_STEPS / 2).max(1) {
+            style = style.add_modifier(Modifier::DIM);
+        }
+
+        {
             out.push(Line::from(Span::styled(
                 line.clone(),
-                Style::default().fg(body_c).add_modifier(Modifier::ITALIC),
-            )));
-        } else {
-            out.push(Line::from(Span::styled(
-                "",
-                Style::default().fg(dim_c),
+                style,
             )));
         }
     }
@@ -705,13 +722,15 @@ fn run_app<B: Backend>(
     let poem_library = poems::load_poems(poems_dir.as_deref());
     let mut poem_state = PoemViewState {
         poem: pick_poem(&poem_library, language),
-        revealed_lines: 0,
         glow_phase: 0,
         last_anim: Instant::now(),
-        last_reveal: Instant::now(),
         twinkle_seed: rand::random::<u64>(),
         twinkles: Vec::new(),
+        line_fade: Vec::new(),
+        fade_idx: 0,
+        fade_step: 0,
     };
+    reset_poem_fade(&mut poem_state);
     let tick_rate = if refresh_minutes == 0 {
         None
     } else {
@@ -722,20 +741,24 @@ fn run_app<B: Backend>(
     loop {
         // Poem animation: slow, romantic, peaceful.
         // - Gentle breathing glow (slow phase increment)
-        // - Reveal by line (every ~700ms)
+        // - Fade-in by line (DIM -> normal)
         const ANIM_RATE: std::time::Duration = std::time::Duration::from_millis(120);
-        const REVEAL_RATE: std::time::Duration = std::time::Duration::from_millis(700);
         if show_poem && poem_state.last_anim.elapsed() >= ANIM_RATE {
             poem_state.last_anim = Instant::now();
             poem_state.glow_phase = poem_state.glow_phase.wrapping_add(1);
-            needs_redraw = true;
-        }
-        if show_poem && poem_state.last_reveal.elapsed() >= REVEAL_RATE {
-            poem_state.last_reveal = Instant::now();
-            if poem_state.revealed_lines < poem_state.poem.lines.len() {
-                poem_state.revealed_lines += 1;
-                needs_redraw = true;
+            // Advance fade for the current line
+            if poem_state.fade_idx < poem_state.poem.lines.len() {
+                poem_state.fade_step = poem_state.fade_step.saturating_add(1);
+                let level = poem_state.fade_step.min(LINE_FADE_STEPS);
+                if let Some(slot) = poem_state.line_fade.get_mut(poem_state.fade_idx) {
+                    *slot = level;
+                }
+                if poem_state.fade_step >= LINE_FADE_STEPS {
+                    poem_state.fade_idx += 1;
+                    poem_state.fade_step = 0;
+                }
             }
+            needs_redraw = true;
         }
 
         if needs_redraw {
@@ -794,7 +817,7 @@ fn run_app<B: Backend>(
                     if inner.width >= 2 && inner.height >= 2 {
                         let poem_lines = render_poem_lines_soft(
                             &poem_state.poem,
-                            poem_state.revealed_lines,
+                            &poem_state.line_fade,
                             poem_state.glow_phase,
                         );
                         let paragraph = Paragraph::new(poem_lines)
@@ -894,12 +917,11 @@ fn run_app<B: Backend>(
                             language = language.next();
                             if show_poem {
                                 poem_state.poem = pick_poem(&poem_library, language);
-                                poem_state.revealed_lines = 0;
                                 poem_state.glow_phase = 0;
                                 poem_state.last_anim = Instant::now();
-                                poem_state.last_reveal = Instant::now();
                                 poem_state.twinkle_seed = rand::random::<u64>();
                                 poem_state.twinkles.clear();
+                                reset_poem_fade(&mut poem_state);
                             }
                             needs_redraw = true;
                         }
@@ -915,24 +937,22 @@ fn run_app<B: Backend>(
                             show_poem = !show_poem;
                             if show_poem {
                                 poem_state.poem = pick_poem(&poem_library, language);
-                                poem_state.revealed_lines = 0;
                                 poem_state.glow_phase = 0;
                                 poem_state.last_anim = Instant::now();
-                                poem_state.last_reveal = Instant::now();
                                 poem_state.twinkle_seed = rand::random::<u64>();
                                 poem_state.twinkles.clear();
+                                reset_poem_fade(&mut poem_state);
                             }
                             needs_redraw = true;
                         }
                         KeyCode::Char('P') => {
                             if show_poem {
                                 poem_state.poem = pick_poem(&poem_library, language);
-                                poem_state.revealed_lines = 0;
                                 poem_state.glow_phase = 0;
                                 poem_state.last_anim = Instant::now();
-                                poem_state.last_reveal = Instant::now();
                                 poem_state.twinkle_seed = rand::random::<u64>();
                                 poem_state.twinkles.clear();
+                                reset_poem_fade(&mut poem_state);
                                 needs_redraw = true;
                             }
                         }
