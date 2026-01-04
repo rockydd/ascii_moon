@@ -430,6 +430,8 @@ struct PoemViewState {
     line_fade: Vec<u8>,
     fade_idx: usize,
     fade_step: u8,
+    last_fade: Instant,
+    fade_pause_until: Option<Instant>,
 }
 
 #[derive(Debug, Clone)]
@@ -478,6 +480,8 @@ fn reset_poem_fade(state: &mut PoemViewState) {
     state.line_fade = vec![0; state.poem.lines.len()];
     state.fade_idx = 0;
     state.fade_step = 0;
+    state.last_fade = Instant::now();
+    state.fade_pause_until = None;
 }
 
 fn soft_palette_for_theme(glow_phase: u64, theme: Theme, truecolor: bool) -> (Color, Color, Color) {
@@ -856,6 +860,8 @@ fn run_app<B: Backend>(
         line_fade: Vec::new(),
         fade_idx: 0,
         fade_step: 0,
+        last_fade: Instant::now(),
+        fade_pause_until: None,
     };
     reset_poem_fade(&mut poem_state);
     let tick_rate = if refresh_minutes == 0 {
@@ -868,13 +874,29 @@ fn run_app<B: Backend>(
     loop {
         // Poem animation: slow, romantic, peaceful.
         // - Gentle breathing glow (slow phase increment)
-        // - Fade-in by line (DIM -> normal)
+        // - Fade-in by line
         const ANIM_RATE: std::time::Duration = std::time::Duration::from_millis(120);
+        const FADE_RATE: std::time::Duration = std::time::Duration::from_millis(140);
+        const LINE_GAP: std::time::Duration = std::time::Duration::from_millis(400);
         if show_poem && poem_state.last_anim.elapsed() >= ANIM_RATE {
             poem_state.last_anim = Instant::now();
             poem_state.glow_phase = poem_state.glow_phase.wrapping_add(1);
-            // Advance fade for the current line
-            if poem_state.fade_idx < poem_state.poem.lines.len() {
+            needs_redraw = true;
+        }
+
+        // Advance fade for the current line on its own cadence, with a pause between lines.
+        if show_poem && poem_state.last_fade.elapsed() >= FADE_RATE {
+            // Respect inter-line pause if set.
+            if let Some(until) = poem_state.fade_pause_until {
+                if Instant::now() < until {
+                    // Still pausing.
+                } else {
+                    poem_state.fade_pause_until = None;
+                }
+            }
+
+            if poem_state.fade_pause_until.is_none() && poem_state.fade_idx < poem_state.poem.lines.len() {
+                poem_state.last_fade = Instant::now();
                 poem_state.fade_step = poem_state.fade_step.saturating_add(1);
                 let level = poem_state.fade_step.min(LINE_FADE_STEPS);
                 if let Some(slot) = poem_state.line_fade.get_mut(poem_state.fade_idx) {
@@ -883,9 +905,10 @@ fn run_app<B: Backend>(
                 if poem_state.fade_step >= LINE_FADE_STEPS {
                     poem_state.fade_idx += 1;
                     poem_state.fade_step = 0;
+                    poem_state.fade_pause_until = Some(Instant::now() + LINE_GAP);
                 }
+                needs_redraw = true;
             }
-            needs_redraw = true;
         }
 
         if needs_redraw {
