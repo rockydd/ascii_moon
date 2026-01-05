@@ -137,10 +137,18 @@ fn default_poems() -> PoemLibrary {
             Language::English,
             include_str!("../poems/en/to_the_moon_shelley_excerpt.txt"),
         ),
+        (
+            Language::English,
+            include_str!("../poems/en/the_moon_dickinson_1896.txt"),
+        ),
         (Language::Chinese, include_str!("../poems/zh/jing_ye_si_li_bai.txt")),
         (
             Language::Chinese,
             include_str!("../poems/zh/wang_yue_huai_yuan_zhang_jiu_ling.txt"),
+        ),
+        (
+            Language::Chinese,
+            include_str!("../poems/zh/shi_wu_ye_wang_yue_wang_jian.txt"),
         ),
         (
             Language::French,
@@ -150,8 +158,16 @@ fn default_poems() -> PoemLibrary {
             Language::French,
             include_str!("../poems/fr/au_clair_de_la_lune_traditionnel.txt"),
         ),
+        (
+            Language::French,
+            include_str!("../poems/fr/la_lune_blanche_verlaine.txt"),
+        ),
         (Language::Japanese, include_str!("../poems/ja/meigetsu_ya_basho.txt")),
         (Language::Japanese, include_str!("../poems/ja/meigetsu_wo_issa.txt")),
+        (
+            Language::Japanese,
+            include_str!("../poems/ja/tsuki_tenshin_buson.txt"),
+        ),
         (
             Language::Spanish,
             include_str!("../poems/es/romance_de_la_luna_lorca_excerpt.txt"),
