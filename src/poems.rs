@@ -126,6 +126,38 @@ fn load_poems_from_dir(base_dir: &Path) -> PoemLibrary {
     lib
 }
 
+fn has_any_poems_in_dir(base_dir: &Path) -> bool {
+    for lang in [
+        Language::English,
+        Language::Chinese,
+        Language::French,
+        Language::Japanese,
+        Language::Spanish,
+    ] {
+        let mut dir = PathBuf::from(base_dir);
+        dir.push(lang_dir(lang));
+        let Ok(read_dir) = fs::read_dir(&dir) else { continue };
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("txt") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Best-effort guess of where Homebrew (and other prefix-based installers) put data files.
+///
+/// If the binary is installed at `<prefix>/bin/ascii_moon`, then poems can be installed to:
+/// `<prefix>/share/ascii_moon/poems`.
+fn installed_poems_dir_from_exe() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let bin_dir = exe.parent()?;
+    let prefix = bin_dir.parent()?;
+    Some(prefix.join("share").join("ascii_moon").join("poems"))
+}
+
 fn default_poems() -> PoemLibrary {
     let mut lib = PoemLibrary::default();
 
@@ -189,15 +221,30 @@ fn default_poems() -> PoemLibrary {
 
 /// Load poems from the filesystem (for customization) and merge with built-in defaults.
 ///
-/// - If `poems_dir` is `None`, we try `./poems` (current working directory).
+/// - If `poems_dir` is `None`, we try (in order):
+///   - `./poems` (current working directory)
+///   - `<prefix>/share/ascii_moon/poems` (derived from the installed binary location)
 /// - If a language has at least one poem in the filesystem dir, we use those poems for that language.
 ///   Otherwise, we fall back to built-in poems for that language.
 pub fn load_poems(poems_dir: Option<&Path>) -> PoemLibrary {
     let defaults = default_poems();
 
-    let dir = poems_dir
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("poems"));
+    let dir = if let Some(p) = poems_dir {
+        p.to_path_buf()
+    } else {
+        let cwd = PathBuf::from("poems");
+        if has_any_poems_in_dir(&cwd) {
+            cwd
+        } else if let Some(installed) = installed_poems_dir_from_exe() {
+            if has_any_poems_in_dir(&installed) {
+                installed
+            } else {
+                cwd
+            }
+        } else {
+            cwd
+        }
+    };
 
     let fs_lib = load_poems_from_dir(&dir);
 

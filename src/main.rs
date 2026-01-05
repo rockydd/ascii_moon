@@ -92,7 +92,13 @@ struct Args {
     #[arg(long, default_value_t = false)]
     hide_dark: bool,
 
-    /// Directory containing poem files (defaults to ./poems). Subfolders: en, zh, fr, ja, es
+    /// Directory containing poem files.
+    ///
+    /// If not provided, we try:
+    /// - `./poems` (relative to where you run the command)
+    /// - `<prefix>/share/ascii_moon/poems` (Homebrew-style install location)
+    ///
+    /// Expected subfolders: en, zh, fr, ja, es
     #[arg(long)]
     poems_dir: Option<PathBuf>,
 

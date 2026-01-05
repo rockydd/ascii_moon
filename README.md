@@ -56,7 +56,8 @@ cargo build --release
 
 `ascii_moon` can load moon poems from a folder on disk, so you can add your own poems easily.
 
-- **Default**: looks for `./poems/` (relative to where you run the command)
+- **Default**: looks for `./poems/` (relative to where you run the command). If not found, it also tries:
+  - `<prefix>/share/ascii_moon/poems` (Homebrew-style install location)
 - **Override**: pass `--poems-dir /path/to/poems`
 
 ### Folder layout
