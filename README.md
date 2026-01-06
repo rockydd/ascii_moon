@@ -52,41 +52,6 @@ cargo build --release
 
 ## Usage
 
-## Custom Poems
-
-`ascii_moon` can load moon poems from a folder on disk, so you can add your own poems easily.
-
-- **Default**: looks for `./poems/` (relative to where you run the command). If not found, it also tries:
-  - `<prefix>/share/ascii_moon/poems` (Homebrew-style install location)
-- **Override**: pass `--poems-dir /path/to/poems`
-
-### Folder layout
-
-Create subfolders by language:
-
-- `poems/en/`
-- `poems/zh/`
-- `poems/fr/`
-- `poems/ja/`
-- `poems/es/`
-
-### File format (`.txt`)
-
-Each poem file is simple:
-
-- Line 1: **Title**
-- Line 2: **Author**
-- Line 3: `---`
-- Remaining lines: poem body
-
-## Theme (white terminal background)
-
-If your terminal uses a **light/white** background, the default “soft pastel” poem colors may look too faint.
-Use:
-
-- `--theme light` for higher-contrast poem colors on white backgrounds
-- `--theme dark` for dark terminals
-- `--theme auto` (default) tries to infer from `COLORFGBG` when available
 
 ### Interactive Mode
 
@@ -137,6 +102,42 @@ ascii_moon --lines 20 --hide-dark
 *   **i**: Toggle the information panel.
 *   **q** or **<Esc>**: Quit the application.
 *   Note: Using **←/→** switches the app into **Manual** mode (stops following "Now").
+
+## Theme (white terminal background)
+
+If your terminal uses a **light/white** background, the default “soft pastel” poem colors may look too faint.
+Use:
+
+- `--theme light` for higher-contrast poem colors on white backgrounds
+- `--theme dark` for dark terminals
+- `--theme auto` (default) tries to infer from `COLORFGBG` when available
+
+## Moon Poems
+
+`ascii_moon` can load moon poems from a folder on disk, so you can add your own poems easily.
+
+- **Default**: looks for `./poems/` (relative to where you run the command). If not found, it also tries:
+  - `<prefix>/share/ascii_moon/poems` (Homebrew-style install location)
+- **Override**: pass `--poems-dir /path/to/poems`
+
+### Folder layout
+
+Create subfolders by language:
+
+- `poems/en/`
+- `poems/zh/`
+- `poems/fr/`
+- `poems/ja/`
+- `poems/es/`
+
+### File format (`.txt`)
+
+Each poem file is simple:
+
+- Line 1: **Title**
+- Line 2: **Author**
+- Line 3: `---`
+- Remaining lines: poem body
 
 ## License
 
